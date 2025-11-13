@@ -1,0 +1,40 @@
+const express = require("express");
+const fs = require("fs");
+const path = require("path");
+
+const app = express();
+app.use(express.json());
+
+// funzione per "anonimizzare" un po' l'IP
+function anonymizeIp(ip) {
+  if (!ip) return "";
+  const parts = ip.split(".");
+  if (parts.length === 4) {
+    parts[3] = "0";
+    return parts.join(".");
+  }
+  return ip;
+}
+
+// endpoint che riceve i dati da Shopify
+app.post("/collect", (req, res) => {
+  const clientIp =
+    req.headers["x-forwarded-for"]?.split(",")[0] ||
+    req.socket.remoteAddress;
+
+  const entry = {
+    receivedAt: new Date().toISOString(),
+    ip: anonymizeIp(clientIp),
+    payload: req.body,
+  };
+
+  const logPath = path.join(__dirname, "visitors.log");
+  fs.appendFile(logPath, JSON.stringify(entry) + "\n", () => {});
+
+  res.sendStatus(204); // nessun contenuto, ma ok
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log("Tracker attivo sulla porta " + PORT);
+});
