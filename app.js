@@ -1,8 +1,15 @@
 const express = require("express");
+const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
 
 const app = express();
+
+// === CORS globale: consenti tutte le origini (per ora) ===
+app.use(cors());            // Access-Control-Allow-Origin: *
+app.options("*", cors());   // gestisce tutte le richieste OPTIONS
+
+// === Body JSON ===
 app.use(express.json());
 
 // funzione per "anonimizzare" un po' l'IP
@@ -16,7 +23,7 @@ function anonymizeIp(ip) {
   return ip;
 }
 
-// endpoint che riceve i dati da Shopify
+// === Endpoint di tracking ===
 app.post("/collect", (req, res) => {
   const clientIp =
     req.headers["x-forwarded-for"]?.split(",")[0] ||
@@ -31,7 +38,10 @@ app.post("/collect", (req, res) => {
   const logPath = path.join(__dirname, "visitors.log");
   fs.appendFile(logPath, JSON.stringify(entry) + "\n", () => {});
 
-  res.sendStatus(204); // nessun contenuto, ma ok
+  console.log("Richiesta /collect ricevuta:", entry.payload);
+
+  // Risposta vuota ma valida
+  res.status(204).end();
 });
 
 const PORT = process.env.PORT || 3000;
