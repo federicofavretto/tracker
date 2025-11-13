@@ -7,13 +7,30 @@ const app = express();
 
 // === CORS globale: consenti tutte le origini (per ora) ===
 app.use(cors({
-  origin: "*",
+  origin: function(origin, callback) {
+    // richieste senza origin (es. server-to-server) → ok
+    if (!origin) return callback(null, true);
+
+    const allowedOrigins = [
+      "https://laperleducaviar.com",
+      "https://laperleducaviar.myshopify.com"
+    ];
+
+    if (allowedOrigins.includes(origin)) {
+      // origin autorizzato
+      return callback(null, true);
+    }
+
+    // origin NON autorizzato
+    return callback(new Error("Not allowed by CORS: " + origin));
+  },
   methods: ["POST", "OPTIONS"],
   allowedHeaders: ["Content-Type"]
 }));
 
-// Gestione preflight SOLO per /collect (niente "*")
+// Preflight CORS solo per /collect
 app.options("/collect", cors());
+
 
 // === Body JSON ===
 app.use(express.json());
