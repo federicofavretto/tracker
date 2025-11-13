@@ -6,8 +6,14 @@ const path = require("path");
 const app = express();
 
 // === CORS globale: consenti tutte le origini (per ora) ===
-app.use(cors());            // Access-Control-Allow-Origin: *
-app.options("*", cors());   // gestisce tutte le richieste OPTIONS
+app.use(cors({
+  origin: "*",
+  methods: ["POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type"]
+}));
+
+// Gestione preflight SOLO per /collect (niente "*")
+app.options("/collect", cors());
 
 // === Body JSON ===
 app.use(express.json());
@@ -40,8 +46,7 @@ app.post("/collect", (req, res) => {
 
   console.log("Richiesta /collect ricevuta:", entry.payload);
 
-  // Risposta vuota ma valida
-  res.status(204).end();
+  res.status(204).end(); // risposta vuota ma valida
 });
 
 const PORT = process.env.PORT || 3000;
