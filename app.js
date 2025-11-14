@@ -35,7 +35,7 @@ app.use(
 
 // preflight per /collect e /api/events
 app.options("/collect", cors());
-app.options("/api/events", cors());
+// app.options("/api/events", cors());
 app.post("/collect", express.text({ type: "*/*" }), (req, res, next) => next());
 
 
