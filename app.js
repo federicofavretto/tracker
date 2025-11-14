@@ -26,14 +26,18 @@ app.use(
 
       return callback(new Error("Not allowed by CORS: " + origin));
     },
-    methods: ["GET", "POST", "OPTIONS"],
+    methods: ["POST", "OPTIONS"],
     allowedHeaders: ["Content-Type"],
+    exposedHeaders: ["Content-Type", "Accept"],
+    credentials: false
   })
 );
 
 // preflight per /collect e /api/events
 app.options("/collect", cors());
 app.options("/api/events", cors());
+app.post("/collect", express.text({ type: "*/*" }), (req, res, next) => next());
+
 
 app.use(express.json());
 
