@@ -17,6 +17,7 @@ app.use(
       const allowedOrigins = [
         "https://laperleducaviar.com",
         "https://laperleducaviar.myshopify.com", // modifica se il tuo myshopify è diverso
+        "https://laperledu-caviar.myshopify.com"
       ];
 
       if (allowedOrigins.includes(origin)) {
