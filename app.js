@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 
 const app = express();
+const RESET_TOKEN = "LAPERLE_RESET_2024"; // scegli tu la parola
 
 /**
  * CORS – consenti SOLO i tuoi domini
@@ -45,6 +46,16 @@ function ensureLogsDir() {
     fs.mkdirSync(logsDir);
   }
   return logsDir;
+}
+
+function clearAllLogs() {
+  const logsDir = ensureLogsDir();
+  const files = fs.readdirSync(logsDir);
+  files.forEach((file) => {
+    if (file.startsWith("visitors-") && file.endsWith(".log")) {
+      fs.unlinkSync(path.join(logsDir, file));
+    }
+  });
 }
 
 function getLogFilePath(date = new Date()) {
@@ -209,6 +220,18 @@ app.get("/api/summary", (req, res) => {
     crPageviewToPurchase,
     topPages: topPagesArray,
   });
+});
+
+// Endpoint per AZZERARE tutti i log (uso interno)
+app.get("/admin/reset-logs", (req, res) => {
+  const token = req.query.token;
+
+  if (token !== RESET_TOKEN) {
+    return res.status(403).send("Accesso negato");
+  }
+
+  clearAllLogs();
+  res.send("Log cancellati. La dashboard ripartirà da zero.");
 });
 
 /**
