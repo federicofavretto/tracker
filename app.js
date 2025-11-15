@@ -166,8 +166,9 @@ app.get("/api/summary", (req, res) => {
     addToCart: 0,
     purchases: 0,
     uniqueSessions: new Set(),
-    // per analisi path principale
-    topPages: {}, // path -> count
+    topPages: {},       // path -> count
+    referrers: {},      // dominio referrer -> count
+    utmCombos: {}       // "source|medium|campaign" -> count
   };
 
   events.forEach((ev) => {
@@ -175,11 +176,38 @@ app.get("/api/summary", (req, res) => {
     const type = p.type;
     const sessionId = p.sessionId || null;
     const path = p.path || p.url || "";
+    const ref = p.referrer || "";
+    const utmSource = p.utm_source || "";
+    const utmMedium = p.utm_medium || "";
+    const utmCampaign = p.utm_campaign || "";
 
     if (sessionId) stats.uniqueSessions.add(sessionId);
 
     if (path) {
       stats.topPages[path] = (stats.topPages[path] || 0) + 1;
+    }
+
+    // conta solo i referrer delle pageview (ha più senso)
+    if (type === "pageview") {
+      let key = "Direct / none";
+      if (ref && ref !== "") {
+        try {
+          const url = new URL(ref);
+          key = url.hostname;
+        } catch (e) {
+          key = ref;
+        }
+      }
+      stats.referrers[key] = (stats.referrers[key] || 0) + 1;
+    }
+
+    // UTM (sempre sulle pageview)
+    if (type === "pageview") {
+      const s = utmSource || "(none)";
+      const m = utmMedium || "(none)";
+      const c = utmCampaign || "(none)";
+      const comboKey = `${s}|${m}|${c}`;
+      stats.utmCombos[comboKey] = (stats.utmCombos[comboKey] || 0) + 1;
     }
 
     if (type === "pageview") stats.pageviews++;
@@ -191,21 +219,35 @@ app.get("/api/summary", (req, res) => {
 
   const sessionsCount = stats.uniqueSessions.size || 1;
 
-  // semplici conversion rate
   const crProductToCart =
-    stats.productViews > 0
-      ? (stats.addToCart / stats.productViews) * 100
-      : 0;
+    stats.productViews > 0 ? (stats.addToCart / stats.productViews) * 100 : 0;
   const crCartToPurchase =
     stats.addToCart > 0 ? (stats.purchases / stats.addToCart) * 100 : 0;
   const crPageviewToPurchase =
     stats.pageviews > 0 ? (stats.purchases / stats.pageviews) * 100 : 0;
 
-  // top 5 pagine
   const topPagesArray = Object.entries(stats.topPages)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5)
     .map(([path, count]) => ({ path, count }));
+
+  const topReferrersArray = Object.entries(stats.referrers)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([source, count]) => ({ source, count }));
+
+  const utmArray = Object.entries(stats.utmCombos)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([combo, count]) => {
+      const [s, m, c] = combo.split("|");
+      return {
+        source: s,
+        medium: m,
+        campaign: c,
+        count
+      };
+    });
 
   res.json({
     totalEvents: stats.totalEvents,
@@ -219,8 +261,11 @@ app.get("/api/summary", (req, res) => {
     crCartToPurchase,
     crPageviewToPurchase,
     topPages: topPagesArray,
+    topReferrers: topReferrersArray,
+    utmCombos: utmArray
   });
 });
+
 
 // Endpoint per AZZERARE tutti i log (uso interno)
 app.get("/admin/reset-logs", (req, res) => {
@@ -295,10 +340,17 @@ app.get("/dashboard", (req, res) => {
     <div class="section-title">Funnel principale</div>
     <div class="funnel" id="funnel"></div>
 
-    <div class="section-title">Pagine più viste</div>
-    <div id="topPages"></div>
+<div class="section-title">Pagine più viste</div>
+<div id="topPages"></div>
 
-    <div class="section-title">Eventi recenti</div>
+<div class="section-title">Fonti di traffico</div>
+<div class="grid">
+  <div id="trafficSources"></div>
+  <div id="utmSources"></div>
+</div>
+
+<div class="section-title">Eventi recenti</div>
+
     <div class="filters">
       <label>Tipo:
         <select id="filterType">
@@ -420,6 +472,51 @@ function renderTopPages(summary) {
     '</div>';
 }
 
+function renderTrafficSources(summary) {
+  const el = document.getElementById("trafficSources");
+  if (!el) return;
+
+  let html = '<div class="card"><div class="card-title">Fonti di traffico (referrer)</div>';
+
+  if (!summary.topReferrers || !summary.topReferrers.length) {
+    html += '<div class="card-sub">Nessun dato referrer disponibile.</div></div>';
+    el.innerHTML = html;
+    return;
+  }
+
+  summary.topReferrers.forEach(r => {
+    html += '<div class="card-sub">' + esc(r.source) + ' – ' + esc(r.count) + ' pageview</div>';
+  });
+
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function renderUtm(summary) {
+  const el = document.getElementById("utmSources");
+  if (!el) return;
+
+  let html = '<div class="card"><div class="card-title">UTM (ultime campagne)</div>';
+
+  if (!summary.utmCombos || !summary.utmCombos.length) {
+    html += '<div class="card-sub">Nessuna UTM rilevata.</div></div>';
+    el.innerHTML = html;
+    return;
+  }
+
+  summary.utmCombos.forEach(u => {
+    html += '<div class="card-sub">' +
+      'source: <strong>' + esc(u.source) + '</strong> · ' +
+      'medium: <strong>' + esc(u.medium) + '</strong> · ' +
+      'campaign: <strong>' + esc(u.campaign) + '</strong> ' +
+      ' (' + esc(u.count) + ' pageview)' +
+      '</div>';
+  });
+
+  html += '</div>';
+  el.innerHTML = html;
+}
+
 function renderTable() {
   const tbody = document.getElementById("rows");
   const typeFilter = document.getElementById("filterType").value;
@@ -501,10 +598,13 @@ Promise.all([
   renderOverview(summary);
   renderFunnel(summary);
   renderTopPages(summary);
+  renderTrafficSources(summary);
+  renderUtm(summary);
   renderTable();
 }).catch(err => {
   console.error("Errore nel caricamento dashboard", err);
 });
+
 </script>
 </body>
 </html>
