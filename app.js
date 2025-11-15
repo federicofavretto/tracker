@@ -166,28 +166,48 @@ app.get("/api/summary", (req, res) => {
     addToCart: 0,
     purchases: 0,
     uniqueSessions: new Set(),
-    topPages: {},       // path -> count
-    referrers: {},      // dominio referrer -> count
-    utmCombos: {}       // "source|medium|campaign" -> count
+    uniqueVisitors: new Set(),
+    newVisitors: 0,
+    returningVisitors: 0,
+    devices: { desktop: 0, mobile: 0, tablet: 0, other: 0 },
+    topPages: {},
+    referrers: {},
+    utmCombos: {}
   };
 
   events.forEach((ev) => {
     const p = ev.payload || {};
     const type = p.type;
     const sessionId = p.sessionId || null;
+    const visitorId = p.visitorId || null;
+    const isNewVisitor = p.isNewVisitor === true;
     const path = p.path || p.url || "";
     const ref = p.referrer || "";
     const utmSource = p.utm_source || "";
     const utmMedium = p.utm_medium || "";
     const utmCampaign = p.utm_campaign || "";
+    const deviceType = p.deviceType || "other";
 
     if (sessionId) stats.uniqueSessions.add(sessionId);
+    if (visitorId) stats.uniqueVisitors.add(visitorId);
+
+    // new vs returning (contiamo sulla prima pageview)
+    if (type === "pageview") {
+      if (isNewVisitor) stats.newVisitors++;
+      else stats.returningVisitors++;
+    }
+
+    // device
+    if (deviceType === "desktop" || deviceType === "mobile" || deviceType === "tablet") {
+      stats.devices[deviceType]++;
+    } else {
+      stats.devices.other++;
+    }
 
     if (path) {
       stats.topPages[path] = (stats.topPages[path] || 0) + 1;
     }
 
-    // conta solo i referrer delle pageview (ha più senso)
     if (type === "pageview") {
       let key = "Direct / none";
       if (ref && ref !== "") {
@@ -201,7 +221,6 @@ app.get("/api/summary", (req, res) => {
       stats.referrers[key] = (stats.referrers[key] || 0) + 1;
     }
 
-    // UTM (sempre sulle pageview)
     if (type === "pageview") {
       const s = utmSource || "(none)";
       const m = utmMedium || "(none)";
@@ -241,12 +260,7 @@ app.get("/api/summary", (req, res) => {
     .slice(0, 5)
     .map(([combo, count]) => {
       const [s, m, c] = combo.split("|");
-      return {
-        source: s,
-        medium: m,
-        campaign: c,
-        count
-      };
+      return { source: s, medium: m, campaign: c, count };
     });
 
   res.json({
@@ -257,6 +271,10 @@ app.get("/api/summary", (req, res) => {
     addToCart: stats.addToCart,
     purchases: stats.purchases,
     uniqueSessions: sessionsCount,
+    uniqueVisitors: stats.uniqueVisitors.size,
+    newVisitors: stats.newVisitors,
+    returningVisitors: stats.returningVisitors,
+    devices: stats.devices,
     crProductToCart,
     crCartToPurchase,
     crPageviewToPurchase,
@@ -265,6 +283,7 @@ app.get("/api/summary", (req, res) => {
     utmCombos: utmArray
   });
 });
+
 
 
 // Endpoint per AZZERARE tutti i log (uso interno)
@@ -405,20 +424,27 @@ let ALL_EVENTS = [];
 
 function renderOverview(summary) {
   const el = document.getElementById("overview");
+  const devices = summary.devices || {desktop:0, mobile:0, tablet:0, other:0};
+
   const cards = [
     { label: "Sessioni uniche", value: summary.uniqueSessions },
+    { label: "Visitatori unici", value: summary.uniqueVisitors },
+    { label: "Nuovi / di ritorno", value: (summary.newVisitors || 0) + " / " + (summary.returningVisitors || 0) },
     { label: "Pageview", value: summary.pageviews },
     { label: "Viste prodotto", value: summary.productViews },
     { label: "Add to cart", value: summary.addToCart },
     { label: "Acquisti", value: summary.purchases },
+    { label: "Device (M/D/T)", value: (devices.mobile||0) + " / " + (devices.desktop||0) + " / " + (devices.tablet||0) }
   ];
+
   el.innerHTML = cards.map(c => (
     '<div class="card">' +
       '<div class="card-title">' + esc(c.label) + '</div>' +
-      '<div class="card-value">' + esc(Math.round(c.value)) + '</div>' +
-      '</div>'
+      '<div class="card-value">' + esc(c.value) + '</div>' +
+    '</div>'
   )).join("");
 }
+
 
 function renderFunnel(summary) {
   const el = document.getElementById("funnel");
