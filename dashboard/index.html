@@ -178,23 +178,38 @@
   </div>
 
   <!-- Eventi recenti -->
-  <div class="section-title">Eventi recenti</div>
-  <div class="filters">
-    <label>Tipo:
-      <select id="filterType" class="select">
-        <option value="all">Tutti</option>
-        <option value="pageview">pageview</option>
-        <option value="timeonpage">timeonpage</option>
-        <option value="view_product">view_product</option>
-        <option value="add_to_cart">add_to_cart</option>
-        <option value="purchase">purchase</option>
-        <option value="scroll">scroll</option>
-        <option value="cta_click">cta_click</option>
-      </select>
-    </label>
-    <input id="filterText" class="input" placeholder="Cerca in URL / titolo / dettagli" />
-    <span id="rowsInfo" class="muted"></span>
-  </div>
+<div class="section-title">Eventi recenti</div>
+
+<div class="filters">
+  <label>Periodo:
+    <select id="filterTime" class="select">
+      <option value="7">Ultimi 7 giorni</option>
+      <option value="30">Ultimi 30 giorni</option>
+      <option value="90">Ultimi 3 mesi</option>
+      <option value="180">Ultimi 6 mesi</option>
+      <option value="365">Ultimo anno</option>
+      <option value="all">Tutto</option>
+    </select>
+  </label>
+
+  <label>Tipo:
+    <select id="filterType" class="select">
+      <option value="all">Tutti</option>
+      <option value="pageview">pageview</option>
+      <option value="timeonpage">timeonpage</option>
+      <option value="view_product">view_product</option>
+      <option value="add_to_cart">add_to_cart</option>
+      <option value="purchase">purchase</option>
+      <option value="scroll">scroll</option>
+      <option value="cta_click">cta_click</option>
+    </select>
+  </label>
+
+  <input id="filterText" class="input" placeholder="Cerca in URL / titolo / dettagli" />
+
+  <span id="rowsInfo" class="muted"></span>
+</div>
+
   <div class="card">
     <table>
       <thead>
@@ -365,44 +380,60 @@
       }
     }
 
-    function renderTable() {
-      const tbody = document.getElementById("eventsTableBody");
-      const typeFilter = document.getElementById("filterType").value;
-      const textFilter = document.getElementById("filterText").value.toLowerCase();
+function renderTable() {
+  const tbody = document.getElementById("eventsTableBody");
+  const typeFilter = document.getElementById("filterType").value;
+  const textFilter = document.getElementById("filterText").value.toLowerCase();
+  const timeFilter = document.getElementById("filterTime").value;
 
-      let rows = ALL_EVENTS;
+  let rows = ALL_EVENTS;
 
-      if (typeFilter !== "all") {
-        rows = rows.filter(ev => (ev.payload && ev.payload.type) === typeFilter);
-      }
-      if (textFilter) {
-        rows = rows.filter(ev => {
-          const p = ev.payload || {};
-          const hay =
-            (ev.path || "") + " " +
-            (p.title || "") + " " +
-            (buildDetails(ev) || "");
-          return hay.toLowerCase().includes(textFilter);
-        });
-      }
+  // FILTRO TEMPORALE
+  if (timeFilter !== "all") {
+    const days = Number(timeFilter);
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
 
-      document.getElementById("rowsInfo").textContent =
-        rows.length + " eventi mostrati";
+    rows = rows.filter(ev => {
+      const ts = new Date(ev.receivedAt || ev.payload?.ts).getTime();
+      return ts >= cutoff;
+    });
+  }
 
-      tbody.innerHTML = rows.map(ev => {
-        const p = ev.payload || {};
-        const url = p.url || ev.path || "";
-        const typ = p.type || "";
-        return (
-          "<tr>" +
-            "<td>" + esc(formatDate(ev.receivedAt || p.ts)) + "</td>" +
-            "<td><span class='tag tag-green'>" + esc(typ) + "</span></td>" +
-            "<td>" + esc(url) + "</td>" +
-            "<td>" + esc(buildDetails(ev)) + "</td>" +
-          "</tr>"
-        );
-      }).join("");
-    }
+  // FILTRO PER TIPO
+  if (typeFilter !== "all") {
+    rows = rows.filter(ev => (ev.payload && ev.payload.type) === typeFilter);
+  }
+
+  // FILTRO TESTO
+  if (textFilter) {
+    rows = rows.filter(ev => {
+      const p = ev.payload || {};
+      const hay =
+        (ev.path || "") + " " +
+        (p.title || "") + " " +
+        (buildDetails(ev) || "");
+      return hay.toLowerCase().includes(textFilter);
+    });
+  }
+
+  document.getElementById("rowsInfo").textContent =
+    rows.length + " eventi mostrati";
+
+  tbody.innerHTML = rows.map(ev => {
+    const p = ev.payload || {};
+    const url = p.url || ev.path || "";
+    const typ = p.type || "";
+    return (
+      "<tr>" +
+        "<td>" + esc(formatDate(ev.receivedAt || p.ts)) + "</td>" +
+        "<td><span class='tag tag-green'>" + esc(typ) + "</span></td>" +
+        "<td>" + esc(url) + "</td>" +
+        "<td>" + esc(buildDetails(ev)) + "</td>" +
+      "</tr>"
+    );
+  }).join("");
+}
+
 
     function loadAll() {
       Promise.all([
@@ -427,6 +458,7 @@
       clearTimeout(window._lpdcFilterTimer);
       window._lpdcFilterTimer = setTimeout(renderTable, 120);
     });
+    document.getElementById("filterTime").addEventListener("change", renderTable);
 
     loadAll();
     // auto-refresh ogni 30 secondi

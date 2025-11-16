@@ -302,7 +302,7 @@ app.get("/admin/reset-logs", (req, res) => {
 /**
  * /dashboard – dashboard avanzata
  */
-app.get("/dashboard", (req, res) => {
+/*app.get("/dashboard", (req, res) => {
   res.send(`
 <!doctype html>
 <html lang="it">
@@ -637,6 +637,7 @@ Promise.all([
 </html>
   `);
 });
+*/
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
