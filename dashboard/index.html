@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <title>Analytics – La Perle du Caviar</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root {
+      --bg: #050814;
+      --bg-card: #0c1020;
+      --bg-card-soft: #13182a;
+      --border-soft: #1f2438;
+      --text-main: #f5f5ff;
+      --text-soft: #a9b0c8;
+      --accent: #5cc9ff;
+      --accent-soft: rgba(92,201,255,0.12);
+      --danger: #ff6b6b;
+      --radius-xl: 18px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top,#111633 0,var(--bg) 55%);
+      color: var(--text-main);
+    }
+    h1 {
+      font-size: 22px;
+      font-weight: 600;
+      margin: 0 0 18px;
+    }
+    .sub {
+      font-size: 13px;
+      color: var(--text-soft);
+      margin-bottom: 22px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px,1fr));
+      gap: 14px;
+      margin-bottom: 22px;
+    }
+    .card {
+      background: linear-gradient(145deg,var(--bg-card) 0,var(--bg-card-soft) 100%);
+      border-radius: var(--radius-xl);
+      border: 1px solid var(--border-soft);
+      padding: 14px 16px;
+      box-shadow: 0 18px 45px rgba(0,0,0,0.45);
+    }
+    .card-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-soft);
+      margin-bottom: 6px;
+    }
+    .card-value {
+      font-size: 22px;
+      font-weight: 600;
+    }
+    .card-sub {
+      font-size: 12px;
+      color: var(--text-soft);
+      margin-top: 4px;
+    }
+    .section-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin: 24px 0 10px;
+    }
+    .funnel {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px,1fr));
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .funnel-step {
+      position: relative;
+      padding: 12px 14px;
+      border-radius: var(--radius-xl);
+      border: 1px solid var(--border-soft);
+      background: linear-gradient(145deg,#111628,#090d1a);
+    }
+    .funnel-step-title {
+      font-size: 13px;
+      font-weight: 500;
+      margin-bottom: 4px;
+    }
+    .funnel-step-value {
+      font-size: 18px;
+      font-weight: 600;
+    }
+    .funnel-step-cr {
+      font-size: 11px;
+      color: var(--text-soft);
+      margin-top: 2px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      margin-top: 8px;
+    }
+    th, td {
+      padding: 7px 8px;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      text-align: left;
+    }
+    th {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-soft);
+    }
+    tr:hover td {
+      background: rgba(255,255,255,0.03);
+    }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+    .tag-green {
+      background: rgba(0,220,130,0.13);
+      color: #7cf2c2;
+    }
+    .filters {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-top: 10px;
+      margin-bottom: 4px;
+      font-size: 12px;
+    }
+    .select, .input {
+      background: #050814;
+      border-radius: 10px;
+      border: 1px solid var(--border-soft);
+      color: var(--text-main);
+      font-size: 12px;
+      padding: 4px 8px;
+    }
+    .input { min-width: 200px; }
+    .muted {
+      color: var(--text-soft);
+      font-size: 12px;
+    }
+    @media (max-width: 640px) {
+      body { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Analytics – La Perle du Caviar</h1>
+  <div class="sub">Ultimi eventi registrati (solo dati interni, nessun cookie di terze parti).</div>
+
+  <!-- KPI principali -->
+  <div id="overview" class="grid"></div>
+
+  <!-- Funnel -->
+  <div class="section-title">Funnel principale</div>
+  <div id="funnel" class="funnel"></div>
+
+  <!-- Pagine più viste -->
+  <div class="section-title">Pagine più viste</div>
+  <div id="topPages" class="card muted">Nessun dato sufficiente.</div>
+
+  <!-- Fonti di traffico -->
+  <div class="section-title">Fonti di traffico</div>
+  <div class="grid">
+    <div id="trafficSources" class="card muted">Nessun dato referrer disponibile.</div>
+    <div id="utmSources" class="card muted">Nessuna UTM rilevata.</div>
+  </div>
+
+  <!-- Eventi recenti -->
+  <div class="section-title">Eventi recenti</div>
+  <div class="filters">
+    <label>Tipo:
+      <select id="filterType" class="select">
+        <option value="all">Tutti</option>
+        <option value="pageview">pageview</option>
+        <option value="timeonpage">timeonpage</option>
+        <option value="view_product">view_product</option>
+        <option value="add_to_cart">add_to_cart</option>
+        <option value="purchase">purchase</option>
+        <option value="scroll">scroll</option>
+        <option value="cta_click">cta_click</option>
+      </select>
+    </label>
+    <input id="filterText" class="input" placeholder="Cerca in URL / titolo / dettagli" />
+    <span id="rowsInfo" class="muted"></span>
+  </div>
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>Quando</th>
+          <th>Tipo</th>
+          <th>Pagina / URL</th>
+          <th>Dettagli</th>
+        </tr>
+      </thead>
+      <tbody id="eventsTableBody"></tbody>
+    </table>
+  </div>
+
+  <script>
+    let ALL_EVENTS = [];
+
+    function esc(str) {
+      if (str == null) return "";
+      return String(str)
+        .replace(/&/g,"&amp;")
+        .replace(/</g,"&lt;")
+        .replace(/>/g,"&gt;")
+        .replace(/"/g,"&quot;");
+    }
+
+    function renderOverview(summary) {
+      const el = document.getElementById("overview");
+      const devices = summary.devices || {desktop:0, mobile:0, tablet:0, other:0};
+
+      const cards = [
+        { label: "Sessioni uniche", value: summary.uniqueSessions || 0 },
+        { label: "Visitatori unici", value: summary.uniqueVisitors || 0 },
+        { label: "Nuovi / di ritorno", value: (summary.newVisitors||0) + " / " + (summary.returningVisitors||0) },
+        { label: "Pageview", value: summary.pageviews || 0 },
+        { label: "Viste prodotto", value: summary.productViews || 0 },
+        { label: "Add to cart", value: summary.addToCart || 0 },
+        { label: "Acquisti", value: summary.purchases || 0 },
+        { label: "Device (M/D/T)", value: (devices.mobile||0) + " / " + (devices.desktop||0) + " / " + (devices.tablet||0) }
+      ];
+
+      el.innerHTML = cards.map(c =>
+        '<div class="card">' +
+          '<div class="card-title">'+ esc(c.label) +'</div>' +
+          '<div class="card-value">'+ esc(c.value) +'</div>' +
+        '</div>'
+      ).join("");
+    }
+
+    function renderFunnel(summary) {
+      const el = document.getElementById("funnel");
+      const pv = summary.pageviews || 0;
+      const vp = summary.productViews || 0;
+      const atc = summary.addToCart || 0;
+      const pur = summary.purchases || 0;
+
+      function cr(from, to) {
+        if (!from) return "CR: 0.0%";
+        const val = (to / from) * 100;
+        return "CR: " + val.toFixed(1) + "%";
+      }
+
+      el.innerHTML = [
+        {
+          title: "Pageview",
+          value: pv,
+          cr: cr(pv, pur) + " → purchase"
+        },
+        {
+          title: "View product",
+          value: vp,
+          cr: cr(vp, atc) + " → add_to_cart"
+        },
+        {
+          title: "Add to cart",
+          value: atc,
+          cr: cr(atc, pur) + " → purchase"
+        },
+        {
+          title: "Purchase",
+          value: pur,
+          cr: ""
+        }
+      ].map(step =>
+        '<div class="funnel-step">' +
+          '<div class="funnel-step-title">'+ esc(step.title) +'</div>' +
+          '<div class="funnel-step-value">'+ esc(step.value) +'</div>' +
+          (step.cr ? '<div class="funnel-step-cr">'+ esc(step.cr) +'</div>' : '') +
+        '</div>'
+      ).join("");
+    }
+
+    function renderTopPages(summary) {
+      const el = document.getElementById("topPages");
+      if (!summary.topPages || !summary.topPages.length) {
+        el.className = "card muted";
+        el.textContent = "Nessun dato sufficiente.";
+        return;
+      }
+      el.className = "card";
+      el.innerHTML = '<div class="card-title">Top pages (ultimi eventi)</div>' +
+        summary.topPages.map(p =>
+          '<div class="card-sub">'+ esc(p.path) +' – '+ esc(p.count) +' visite</div>'
+        ).join("");
+    }
+
+    function renderTrafficSources(summary) {
+      const el = document.getElementById("trafficSources");
+      if (!summary.topReferrers || !summary.topReferrers.length) {
+        el.className = "card muted";
+        el.textContent = "Nessun dato referrer disponibile.";
+        return;
+      }
+      el.className = "card";
+      el.innerHTML = '<div class="card-title">Fonti di traffico (referrer)</div>' +
+        summary.topReferrers.map(r =>
+          '<div class="card-sub">'+ esc(r.source) +' – '+ esc(r.count) +' pageview</div>'
+        ).join("");
+    }
+
+    function renderUtm(summary) {
+      const el = document.getElementById("utmSources");
+      if (!summary.utmCombos || !summary.utmCombos.length) {
+        el.className = "card muted";
+        el.textContent = "Nessuna UTM rilevata.";
+        return;
+      }
+      el.className = "card";
+      el.innerHTML = '<div class="card-title">UTM (ultime campagne)</div>' +
+        summary.utmCombos.map(u =>
+          '<div class="card-sub">source: <strong>'+ esc(u.source) +
+          '</strong> · medium: <strong>'+ esc(u.medium) +
+          '</strong> · campaign: <strong>'+ esc(u.campaign) +
+          '</strong> ('+ esc(u.count) +' pageview)</div>'
+        ).join("");
+    }
+
+    function formatDate(ts) {
+      if (!ts) return "";
+      const d = new Date(ts);
+      if (isNaN(d)) return esc(ts);
+      const dd = String(d.getDate()).padStart(2,"0");
+      const mm = String(d.getMonth()+1).padStart(2,"0");
+      const yyyy = d.getFullYear();
+      const hh = String(d.getHours()).padStart(2,"0");
+      const mi = String(d.getMinutes()).padStart(2,"0");
+      const ss = String(d.getSeconds()).padStart(2,"0");
+      return `${dd}/${mm}/${yyyy}, ${hh}:${mi}:${ss}`;
+    }
+
+    function buildDetails(ev) {
+      const p = ev.payload || {};
+      switch (p.type) {
+        case "timeonpage":
+          return "Durata: " + ((p.millis||0)/1000).toFixed(0) + "s";
+        case "scroll":
+          return "Profondità: " + (p.depth||0) + "%";
+        case "view_product":
+          return "Prodotto: " + (p.productTitle || p.productId || "");
+        case "add_to_cart":
+          return "Variant: " + (p.variantId||"") + " · qty: " + (p.quantity||1);
+        case "purchase":
+          return "Ordine: " + (p.orderId || "") + " · valore: " + (p.total || "");
+        case "cta_click":
+          return "CTA: " + (p.label || "") + " · testo: " + (p.text || "");
+        default:
+          return "";
+      }
+    }
+
+    function renderTable() {
+      const tbody = document.getElementById("eventsTableBody");
+      const typeFilter = document.getElementById("filterType").value;
+      const textFilter = document.getElementById("filterText").value.toLowerCase();
+
+      let rows = ALL_EVENTS;
+
+      if (typeFilter !== "all") {
+        rows = rows.filter(ev => (ev.payload && ev.payload.type) === typeFilter);
+      }
+      if (textFilter) {
+        rows = rows.filter(ev => {
+          const p = ev.payload || {};
+          const hay =
+            (ev.path || "") + " " +
+            (p.title || "") + " " +
+            (buildDetails(ev) || "");
+          return hay.toLowerCase().includes(textFilter);
+        });
+      }
+
+      document.getElementById("rowsInfo").textContent =
+        rows.length + " eventi mostrati";
+
+      tbody.innerHTML = rows.map(ev => {
+        const p = ev.payload || {};
+        const url = p.url || ev.path || "";
+        const typ = p.type || "";
+        return (
+          "<tr>" +
+            "<td>" + esc(formatDate(ev.receivedAt || p.ts)) + "</td>" +
+            "<td><span class='tag tag-green'>" + esc(typ) + "</span></td>" +
+            "<td>" + esc(url) + "</td>" +
+            "<td>" + esc(buildDetails(ev)) + "</td>" +
+          "</tr>"
+        );
+      }).join("");
+    }
+
+    function loadAll() {
+      Promise.all([
+        fetch("/api/summary").then(r => r.json()),
+        fetch("/api/events?limit=300").then(r => r.json())
+      ]).then(([summary, events]) => {
+        ALL_EVENTS = events || [];
+        renderOverview(summary || {});
+        renderFunnel(summary || {});
+        renderTopPages(summary || {});
+        renderTrafficSources(summary || {});
+        renderUtm(summary || {});
+        renderTable();
+      }).catch(err => {
+        console.error("Errore nel caricamento della dashboard", err);
+      });
+    }
+
+    document.getElementById("filterType").addEventListener("change", renderTable);
+    document.getElementById("filterText").addEventListener("input", function() {
+      // piccolo debounce
+      clearTimeout(window._lpdcFilterTimer);
+      window._lpdcFilterTimer = setTimeout(renderTable, 120);
+    });
+
+    loadAll();
+    // auto-refresh ogni 30 secondi
+    setInterval(loadAll, 30000);
+  </script>
+</body>
+</html>

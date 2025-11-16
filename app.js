@@ -35,6 +35,7 @@ app.options("/api/events", cors());
 app.options("/api/summary", cors());
 
 app.use(express.json());
+app.use("/dashboard", express.static(path.join(__dirname, "dashboard")));
 
 /**
  * Helpers logging
