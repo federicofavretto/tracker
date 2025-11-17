@@ -381,6 +381,23 @@ app.get("/admin/reset-logs", (req, res) => {
   res.send("Log cancellati. La dashboard ripartirà da zero.");
 });
 
+app.get("/admin/reset-db", async (req, res) => {
+  const token = req.query.token;
+
+  if (token !== RESET_TOKEN) {
+    return res.status(403).send("Accesso negato");
+  }
+
+  try {
+    await pool.query("TRUNCATE TABLE events RESTART IDENTITY;");
+    res.send("Database eventi azzerato. Ora parti da zero!");
+  } catch (err) {
+    console.error("Errore nel reset del DB", err);
+    res.status(500).send("Errore nel cancellare gli eventi.");
+  }
+});
+
+
 /**
  * /dashboard – dashboard avanzata
  */
