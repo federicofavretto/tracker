@@ -5,6 +5,7 @@ const path = require("path");
 
 const app = express();
 const RESET_TOKEN = "LAPERLE_RESET_2024"; // scegli tu la parola
+const pool = require('./db');   // <-- importa il pool di Postgres
 
 /**
  * CORS – consenti SOLO i tuoi domini
@@ -91,7 +92,7 @@ function logEvent(entry) {
  *  - add_to_cart
  *  - purchase
  */
-app.post("/collect", (req, res) => {
+app.post("/collect", async (req, res) => {
   const clientIp =
     req.headers["x-forwarded-for"]?.split(",")[0] ||
     req.socket.remoteAddress;
@@ -104,186 +105,253 @@ app.post("/collect", (req, res) => {
   };
 
   console.log("Evento /collect:", entry.payload);
-  logEvent(entry);
+  logEvent(entry); // continuiamo anche a loggare su file, se vuoi
+
+  try {
+    await pool.query(
+      `INSERT INTO events (occurred_at, ip, user_agent, payload)
+       VALUES ($1, $2, $3, $4)`,
+      [entry.receivedAt, entry.ip, entry.userAgent, entry.payload]
+    );
+  } catch (err) {
+    console.error('Error inserting event into Postgres', err);
+    // NON blocchiamo la risposta al browser
+  }
 
   res.status(204).end();
+});
+
+
+app.post('/api/track', async (req, res) => {
+  try {
+    const { event_type, url, session_id, meta } = req.body;
+
+    await pool.query(
+      `INSERT INTO events (event_type, url, session_id, user_agent, meta)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [
+        event_type,
+        url || null,
+        session_id || null,
+        req.headers['user-agent'] || null,
+        meta || {}
+      ]
+    );
+
+    res.status(201).json({ ok: true });
+  } catch (err) {
+    console.error('Error inserting event', err);
+    res.status(500).json({ ok: false });
+  }
 });
 
 /**
  * Legge gli ultimi N eventi dai file log (partendo dai più recenti)
  */
-function readLastEvents(limit = 200) {
-  const logsDir = ensureLogsDir();
-  const files = fs
-    .readdirSync(logsDir)
-    .filter((f) => f.startsWith("visitors-") && f.endsWith(".log"))
-    .sort()
-    .reverse();
+async function readLastEvents(limit = 200) {
+  const result = await pool.query(
+    `SELECT occurred_at, ip, user_agent, payload
+     FROM events
+     ORDER BY occurred_at DESC
+     LIMIT $1`,
+    [limit]
+  );
 
-  const events = [];
-
-  for (const file of files) {
-    const fullPath = path.join(logsDir, file);
-    const content = fs.readFileSync(fullPath, "utf-8").trim();
-    if (!content) continue;
-    const lines = content.split("\n");
-
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i];
-      if (!line) continue;
-      try {
-        const obj = JSON.parse(line);
-        events.push(obj);
-        if (events.length >= limit) break;
-      } catch (e) {}
-    }
-    if (events.length >= limit) break;
-  }
-
-  return events;
+  // Ricostruiamo lo stesso formato dei vecchi log:
+  return result.rows.map(row => ({
+    receivedAt: row.occurred_at,
+    ip: row.ip,
+    userAgent: row.user_agent,
+    payload: row.payload
+  }));
 }
+
 
 /**
  * /api/events – per tabella dettagli
  */
-app.get("/api/events", (req, res) => {
-  const limit = Number(req.query.limit) || 200;
-  const events = readLastEvents(limit);
-  res.json(events);
+app.get('/api/events', async (req, res) => {
+  const limit = Number(req.query.limit) || 300;
+  const range = req.query.range || null; // '7d', '30d', ecc.
+
+  const ranges = {
+    '7d':   "NOW() - INTERVAL '7 days'",
+    '30d':  "NOW() - INTERVAL '30 days'",
+    '90d':  "NOW() - INTERVAL '90 days'",
+    '180d': "NOW() - INTERVAL '180 days'",
+    '365d': "NOW() - INTERVAL '365 days'"
+  };
+
+  try {
+    let whereClause = '';
+    const params = [limit];
+
+    if (range && ranges[range]) {
+      whereClause = `WHERE occurred_at >= ${ranges[range]}`;
+    }
+
+    const query = `
+      SELECT occurred_at, ip, user_agent, payload
+      FROM events
+      ${whereClause}
+      ORDER BY occurred_at DESC
+      LIMIT $1
+    `;
+
+    const result = await pool.query(query, params);
+
+    const events = result.rows.map(row => ({
+      receivedAt: row.occurred_at,
+      ip: row.ip,
+      userAgent: row.user_agent,
+      payload: row.payload
+    }));
+
+    res.json(events);
+  } catch (err) {
+    console.error('Error fetching events', err);
+    res.status(500).json({ ok: false });
+  }
 });
+
+
 
 /**
  * /api/summary – statistiche per la dashboard (funnel)
  * calcolate sugli ultimi 2000 eventi (puoi regolare)
  */
-app.get("/api/summary", (req, res) => {
-  const events = readLastEvents(2000);
+app.get("/api/summary", async (req, res) => {
+  try {
+    const events = await readLastEvents(2000);
 
-  const stats = {
-    totalEvents: events.length,
-    pageviews: 0,
-    timeonpageEvents: 0,
-    productViews: 0,
-    addToCart: 0,
-    purchases: 0,
-    uniqueSessions: new Set(),
-    uniqueVisitors: new Set(),
-    newVisitors: 0,
-    returningVisitors: 0,
-    devices: { desktop: 0, mobile: 0, tablet: 0, other: 0 },
-    topPages: {},
-    referrers: {},
-    utmCombos: {}
-  };
+    const stats = {
+      totalEvents: events.length,
+      pageviews: 0,
+      timeonpageEvents: 0,
+      productViews: 0,
+      addToCart: 0,
+      purchases: 0,
+      uniqueSessions: new Set(),
+      uniqueVisitors: new Set(),
+      newVisitors: 0,
+      returningVisitors: 0,
+      devices: { desktop: 0, mobile: 0, tablet: 0, other: 0 },
+      topPages: {},
+      referrers: {},
+      utmCombos: {}
+    };
 
-  events.forEach((ev) => {
-    const p = ev.payload || {};
-    const type = p.type;
-    const sessionId = p.sessionId || null;
-    const visitorId = p.visitorId || null;
-    const isNewVisitor = p.isNewVisitor === true;
-    const path = p.path || p.url || "";
-    const ref = p.referrer || "";
-    const utmSource = p.utm_source || "";
-    const utmMedium = p.utm_medium || "";
-    const utmCampaign = p.utm_campaign || "";
-    const deviceType = p.deviceType || "other";
+    events.forEach((ev) => {
+      const p = ev.payload || {};
+      const type = p.type;
+      const sessionId = p.sessionId || null;
+      const visitorId = p.visitorId || null;
+      const isNewVisitor = p.isNewVisitor === true;
+      const path = p.path || p.url || "";
+      const ref = p.referrer || "";
+      const utmSource = p.utm_source || "";
+      const utmMedium = p.utm_medium || "";
+      const utmCampaign = p.utm_campaign || "";
+      const deviceType = p.deviceType || "other";
 
-    if (sessionId) stats.uniqueSessions.add(sessionId);
-    if (visitorId) stats.uniqueVisitors.add(visitorId);
+      if (sessionId) stats.uniqueSessions.add(sessionId);
+      if (visitorId) stats.uniqueVisitors.add(visitorId);
 
-    // new vs returning (contiamo sulla prima pageview)
-    if (type === "pageview") {
-      if (isNewVisitor) stats.newVisitors++;
-      else stats.returningVisitors++;
-    }
-
-    // device
-    if (deviceType === "desktop" || deviceType === "mobile" || deviceType === "tablet") {
-      stats.devices[deviceType]++;
-    } else {
-      stats.devices.other++;
-    }
-
-    if (path) {
-      stats.topPages[path] = (stats.topPages[path] || 0) + 1;
-    }
-
-    if (type === "pageview") {
-      let key = "Direct / none";
-      if (ref && ref !== "") {
-        try {
-          const url = new URL(ref);
-          key = url.hostname;
-        } catch (e) {
-          key = ref;
-        }
+      if (type === "pageview") {
+        if (isNewVisitor) stats.newVisitors++;
+        else stats.returningVisitors++;
       }
-      stats.referrers[key] = (stats.referrers[key] || 0) + 1;
-    }
 
-    if (type === "pageview") {
-      const s = utmSource || "(none)";
-      const m = utmMedium || "(none)";
-      const c = utmCampaign || "(none)";
-      const comboKey = `${s}|${m}|${c}`;
-      stats.utmCombos[comboKey] = (stats.utmCombos[comboKey] || 0) + 1;
-    }
+      if (deviceType === "desktop" || deviceType === "mobile" || deviceType === "tablet") {
+        stats.devices[deviceType]++;
+      } else {
+        stats.devices.other++;
+      }
 
-    if (type === "pageview") stats.pageviews++;
-    else if (type === "timeonpage") stats.timeonpageEvents++;
-    else if (type === "view_product") stats.productViews++;
-    else if (type === "add_to_cart") stats.addToCart++;
-    else if (type === "purchase") stats.purchases++;
-  });
+      if (path) {
+        stats.topPages[path] = (stats.topPages[path] || 0) + 1;
+      }
 
-  const sessionsCount = stats.uniqueSessions.size || 1;
+      if (type === "pageview") {
+        let key = "Direct / none";
+        if (ref && ref !== "") {
+          try {
+            const url = new URL(ref);
+            key = url.hostname;
+          } catch (e) {
+            key = ref;
+          }
+        }
+        stats.referrers[key] = (stats.referrers[key] || 0) + 1;
+      }
 
-  const crProductToCart =
-    stats.productViews > 0 ? (stats.addToCart / stats.productViews) * 100 : 0;
-  const crCartToPurchase =
-    stats.addToCart > 0 ? (stats.purchases / stats.addToCart) * 100 : 0;
-  const crPageviewToPurchase =
-    stats.pageviews > 0 ? (stats.purchases / stats.pageviews) * 100 : 0;
+      if (type === "pageview") {
+        const s = utmSource || "(none)";
+        const m = utmMedium || "(none)";
+        const c = utmCampaign || "(none)";
+        const comboKey = `${s}|${m}|${c}`;
+        stats.utmCombos[comboKey] = (stats.utmCombos[comboKey] || 0) + 1;
+      }
 
-  const topPagesArray = Object.entries(stats.topPages)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([path, count]) => ({ path, count }));
-
-  const topReferrersArray = Object.entries(stats.referrers)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([source, count]) => ({ source, count }));
-
-  const utmArray = Object.entries(stats.utmCombos)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([combo, count]) => {
-      const [s, m, c] = combo.split("|");
-      return { source: s, medium: m, campaign: c, count };
+      if (type === "pageview") stats.pageviews++;
+      else if (type === "timeonpage") stats.timeonpageEvents++;
+      else if (type === "view_product") stats.productViews++;
+      else if (type === "add_to_cart") stats.addToCart++;
+      else if (type === "purchase") stats.purchases++;
     });
 
-  res.json({
-    totalEvents: stats.totalEvents,
-    pageviews: stats.pageviews,
-    timeonpageEvents: stats.timeonpageEvents,
-    productViews: stats.productViews,
-    addToCart: stats.addToCart,
-    purchases: stats.purchases,
-    uniqueSessions: sessionsCount,
-    uniqueVisitors: stats.uniqueVisitors.size,
-    newVisitors: stats.newVisitors,
-    returningVisitors: stats.returningVisitors,
-    devices: stats.devices,
-    crProductToCart,
-    crCartToPurchase,
-    crPageviewToPurchase,
-    topPages: topPagesArray,
-    topReferrers: topReferrersArray,
-    utmCombos: utmArray
-  });
+    const sessionsCount = stats.uniqueSessions.size || 1;
+
+    const crProductToCart =
+      stats.productViews > 0 ? (stats.addToCart / stats.productViews) * 100 : 0;
+    const crCartToPurchase =
+      stats.addToCart > 0 ? (stats.purchases / stats.addToCart) * 100 : 0;
+    const crPageviewToPurchase =
+      stats.pageviews > 0 ? (stats.purchases / stats.pageviews) * 100 : 0;
+
+    const topPagesArray = Object.entries(stats.topPages)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([path, count]) => ({ path, count }));
+
+    const topReferrersArray = Object.entries(stats.referrers)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([source, count]) => ({ source, count }));
+
+    const utmArray = Object.entries(stats.utmCombos)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([combo, count]) => {
+        const [s, m, c] = combo.split("|");
+        return { source: s, medium: m, campaign: c, count };
+      });
+
+    res.json({
+      totalEvents: stats.totalEvents,
+      pageviews: stats.pageviews,
+      timeonpageEvents: stats.timeonpageEvents,
+      productViews: stats.productViews,
+      addToCart: stats.addToCart,
+      purchases: stats.purchases,
+      uniqueSessions: sessionsCount,
+      uniqueVisitors: stats.uniqueVisitors.size,
+      newVisitors: stats.newVisitors,
+      returningVisitors: stats.returningVisitors,
+      devices: stats.devices,
+      crProductToCart,
+      crCartToPurchase,
+      crPageviewToPurchase,
+      topPages: topPagesArray,
+      topReferrers: topReferrersArray,
+      utmCombos: utmArray
+    });
+  } catch (err) {
+    console.error('Error in /api/summary', err);
+    res.status(500).json({ ok: false });
+  }
 });
+
 
 
 
