@@ -397,6 +397,45 @@ app.get("/admin/reset-db", async (req, res) => {
   }
 });
 
+app.get("/admin/backup-csv", async (req, res) => {
+  const token = req.query.token;
+
+  if (token !== RESET_TOKEN) {
+    return res.status(403).send("Accesso negato");
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT occurred_at, ip, user_agent, payload
+       FROM events
+       ORDER BY occurred_at ASC`
+    );
+
+    // Prepariamo un CSV semplice
+    let csv = "occurred_at,ip,user_agent,payload_json\n";
+    for (const row of result.rows) {
+      const occurred = row.occurred_at.toISOString();
+      const ip = row.ip ? row.ip.replace(/"/g, '""') : "";
+      const ua = row.user_agent ? row.user_agent.replace(/"/g, '""') : "";
+      const payload = row.payload
+        ? JSON.stringify(row.payload).replace(/"/g, '""')
+        : "";
+
+      csv += `"${occurred}","${ip}","${ua}","${payload}"\n`;
+    }
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="events-backup-${new Date().toISOString().slice(0,10)}.csv"`
+    );
+    res.send(csv);
+  } catch (err) {
+    console.error("Errore nel backup CSV", err);
+    res.status(500).send("Errore nel generare il backup.");
+  }
+});
+
 
 /**
  * /dashboard – dashboard avanzata
