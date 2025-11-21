@@ -148,16 +148,21 @@ app.post('/api/track', async (req, res) => {
 /**
  * Legge gli ultimi N eventi dai file log (partendo dai più recenti)
  */
-async function readLastEvents(limit = 200) {
-  const result = await pool.query(
-    `SELECT occurred_at, ip, user_agent, payload
-     FROM events
-     ORDER BY occurred_at DESC
-     LIMIT $1`,
-    [limit]
-  );
+async function readLastEvents(limit = null) {
+  let query = `
+    SELECT occurred_at, ip, user_agent, payload
+    FROM events
+    ORDER BY occurred_at DESC
+  `;
+  const params = [];
 
-  // Ricostruiamo lo stesso formato dei vecchi log:
+  if (limit) {
+    query += ' LIMIT $1';
+    params.push(limit);
+  }
+
+  const result = await pool.query(query, params);
+
   return result.rows.map(row => ({
     receivedAt: row.occurred_at,
     ip: row.ip,
@@ -165,6 +170,7 @@ async function readLastEvents(limit = 200) {
     payload: row.payload
   }));
 }
+
 
 
 /**
@@ -218,11 +224,11 @@ app.get('/api/events', async (req, res) => {
 
 /**
  * /api/summary – statistiche per la dashboard (funnel)
- * calcolate sugli ultimi 2000 eventi (puoi regolare)
+ * calcolate su tutti gli eventi (puoi regolare inserendo un numero tra le parentesi di readlastevent)
  */
 app.get("/api/summary", async (req, res) => {
   try {
-    const events = await readLastEvents(2000);
+    const events = await readLastEvents();
 
     const stats = {
       totalEvents: events.length,
