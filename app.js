@@ -757,7 +757,7 @@ document.getElementById("filterSearch").addEventListener("input", renderTable);
 // Carica dati
 Promise.all([
   fetch("/api/summary").then(r => r.json()),
-  fetch("/api/events?limit=300").then(r => r.json())
+  fetch("/api/events?limit=10000").then(r => r.json())
 ]).then(([summary, events]) => {
   ALL_EVENTS = events || [];
   renderOverview(summary);
