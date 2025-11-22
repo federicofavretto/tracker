@@ -228,7 +228,7 @@ app.get('/api/events', async (req, res) => {
  */
 app.get("/api/summary", async (req, res) => {
   try {
-    const events = await readLastEvents();
+    const events = await readLastEvents();  // tutti gli eventi (cumulativo)
 
     const stats = {
       totalEvents: events.length,
@@ -244,7 +244,9 @@ app.get("/api/summary", async (req, res) => {
       devices: { desktop: 0, mobile: 0, tablet: 0, other: 0 },
       topPages: {},
       referrers: {},
-      utmCombos: {}
+      utmCombos: {},
+      // 🔴 NUOVO: carrelli attivi in tempo reale
+      latestCartByVisitor: new Map()
     };
 
     events.forEach((ev) => {
@@ -299,11 +301,19 @@ app.get("/api/summary", async (req, res) => {
         stats.utmCombos[comboKey] = (stats.utmCombos[comboKey] || 0) + 1;
       }
 
+      // Eventi cumulativi
       if (type === "pageview") stats.pageviews++;
       else if (type === "timeonpage") stats.timeonpageEvents++;
       else if (type === "view_product") stats.productViews++;
       else if (type === "add_to_cart") stats.addToCart++;
       else if (type === "purchase") stats.purchases++;
+
+      // 🔴 QUI: gestione stato carrello (metodo 2)
+      // ci aspettiamo eventi tipo:
+      // { type: "cart_state", visitorId: "xxx", items: [ {variantId, quantity}, ... ] }
+      if (type === "cart_state" && visitorId) {
+        stats.latestCartByVisitor.set(visitorId, p.items || []);
+      }
     });
 
     const sessionsCount = stats.uniqueSessions.size || 1;
@@ -333,12 +343,18 @@ app.get("/api/summary", async (req, res) => {
         return { source: s, medium: m, campaign: c, count };
       });
 
+    // 🔴 Calcolo carrelli attivi: quanti visitor hanno items.length > 0
+    let activeCarts = 0;
+    for (const [, items] of stats.latestCartByVisitor.entries()) {
+      if (Array.isArray(items) && items.length > 0) activeCarts++;
+    }
+
     res.json({
       totalEvents: stats.totalEvents,
       pageviews: stats.pageviews,
       timeonpageEvents: stats.timeonpageEvents,
       productViews: stats.productViews,
-      addToCart: stats.addToCart,
+      addToCart: stats.addToCart,      // cumulativo
       purchases: stats.purchases,
       uniqueSessions: sessionsCount,
       uniqueVisitors: stats.uniqueVisitors.size,
@@ -350,13 +366,16 @@ app.get("/api/summary", async (req, res) => {
       crPageviewToPurchase,
       topPages: topPagesArray,
       topReferrers: topReferrersArray,
-      utmCombos: utmArray
+      utmCombos: utmArray,
+      // 🔴 NUOVO campo per dashboard
+      activeCarts
     });
   } catch (err) {
     console.error('Error in /api/summary', err);
     res.status(500).json({ ok: false });
   }
 });
+
 
 app.get("/admin/reset-db", async (req, res) => {
   const token = req.query.token;
