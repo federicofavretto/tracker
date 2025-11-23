@@ -228,7 +228,7 @@ app.get('/api/events', async (req, res) => {
  */
 app.get("/api/summary", async (req, res) => {
   try {
-    const events = await readLastEvents();  // tutti gli eventi (cumulativo)
+    const events = await readLastEvents(15000);  // tutti gli eventi (cumulativo)
 
     const stats = {
       totalEvents: events.length,
