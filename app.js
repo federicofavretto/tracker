@@ -7,6 +7,11 @@ const pool = require("./db"); // pool Postgres
 const app = express();
 const RESET_TOKEN = "LAPERLE_RESET_2024";
 
+// Deduplica add_to_cart lato server (2 secondi)
+const recentAddToCart = new Map();
+const ADD_DEDUP_MS = 2000;
+
+
 // ------------------ MIDDLEWARE ------------------
 app.use(
   cors({
@@ -47,6 +52,23 @@ app.post("/collect", async (req, res) => {
     userAgent: req.headers["user-agent"] || "",
     payload: req.body || {},
   };
+
+  if (payload.type === "add_to_cart") {
+    const key = [
+      payload.sessionId || "",
+      payload.visitorId || "",
+      payload.variantId || "",
+      payload.quantity || 1
+    ].join("|");
+
+    const now = Date.now();
+    const last = recentAddToCart.get(key);
+    if (last && (now - last) < ADD_DEDUP_MS) {
+      console.log("Skip duplicate add_to_cart:", key);
+      return res.status(200).json({ ok: true, skipped: "duplicate_add_to_cart" });
+    }
+    recentAddToCart.set(key, now);
+  }
 
   console.log("Evento /collect:", entry.payload?.type, entry.payload?.url || "");
 
