@@ -137,7 +137,7 @@ app.get("/api/events", async (req, res) => {
 app.get("/api/summary", async (req, res) => {
   try {
     // se la tabella cresce molto, puoi mettere un limite: readLastEvents(50000)
-    const events = await readLastEvents();
+    const events = await readLastEvents(500);
 
     const stats = {
       totalEvents: events.length,
