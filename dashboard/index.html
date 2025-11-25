@@ -543,29 +543,28 @@
       case "view_product":
         return (p.productTitle || "") + (p.grams ? ` · ${p.grams} g` : "");
       case "add_to_cart": {
-        var qty = p.quantity || 1;
+        const qty = p.quantity || 1;
 
         if (p.productTitle || p.variantTitle || p.grams) {
-          var labelParts = [];
+          const parts = [];
 
-          if (p.productTitle) {
-            labelParts.push(p.productTitle);
-          }
+          if (p.productTitle) parts.push(p.productTitle);
 
-          // se abbiamo il titolo della variante, lo usiamo (es. "50 g")
           if (p.variantTitle) {
-            labelParts.push(p.variantTitle);
+            // es. "50 g" o "50g"
+            parts.push(p.variantTitle);
           } else if (p.grams) {
-            labelParts.push(p.grams + " g");
+            parts.push(p.grams + " g");
           }
 
-          var label = labelParts.join(" – ");
+          const label = parts.join(" – ");
           return label + " x" + qty;
         }
 
-        // fallback se non abbiamo info leggibili
+        // fallback
         return "Variant " + (p.variantId || "") + " x" + qty;
       }
+
 
       case "cart_state":
         return (p.items && p.items.length ? `${p.items.length} righe in carrello` : "Carrello vuoto");
