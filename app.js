@@ -215,24 +215,31 @@
     } catch(e) {}
   }
 
-  // wrap fetch per intercettare cambi carrello
-  (function() {
-    var origFetch = window.fetch;
-    window.fetch = function(input, init) {
-      return origFetch(input, init).then(function(resp) {
-        try {
-          var url = typeof input === "string" ? input : (input.url || "");
-          if (url.indexOf("/cart") !== -1) {
-            setTimeout(sendCartState, 300);
-          }
-        } catch(e) {}
-        return resp;
-      });
-    };
-  })();
+// wrap fetch per intercettare SOLO le chiamate che modificano il carrello
+(function() {
+  var origFetch = window.fetch;
+  window.fetch = function(input, init) {
+    return origFetch(input, init).then(function(resp) {
+      try {
+        var url = typeof input === "string" ? input : (input.url || "");
+        if (
+          url.indexOf("/cart/add")   !== -1 ||
+          url.indexOf("/cart/change")!== -1 ||
+          url.indexOf("/cart/update")!== -1 ||
+          url.indexOf("/cart/clear") !== -1 ||
+          url.endsWith("/cart.js")
+        ) {
+          setTimeout(sendCartState, 500); // 0.5s dopo la modifica del carrello
+        }
+      } catch(e) {}
+      return resp;
+    });
+  };
+})();
 
-  // fallback: aggiorna cart_state ogni tanto
-  setInterval(sendCartState, 20000);
+// opzionale: puoi anche commentarlo per alleggerire ulteriormente
+// setInterval(sendCartState, 60000); // ogni 60 secondi
+
 
   // ------------------ CHECKOUT_STEP (solo lato URL, best effort) ------------------
   function detectCheckoutStep() {

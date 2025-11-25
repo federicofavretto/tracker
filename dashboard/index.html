@@ -243,395 +243,427 @@
     </table>
   </div>
 
-  <script>
-    let ALL_EVENTS = [];
+<script>
+(function() {
+  const TRACKER_ENDPOINT = "https://tracker-mhw8.onrender.com/collect";
 
-    function esc(str) {
-      if (str == null) return "";
-      return String(str)
-        .replace(/&/g,"&amp;")
-        .replace(/</g,"&lt;")
-        .replace(/>/g,"&gt;")
-        .replace(/"/g,"&quot;");
-    }
+// ------------------ CONSENSO SEMPRE TRUE (modalità test) ------------------
+let hasConsent = true;
+// Forziamo sempre il consenso durante la fase di test
+console.log("Tracker: modalità TEST attiva → consenso forzato su TRUE");
 
-    function renderOverview(summary) {
-      const el = document.getElementById("overview");
-      const devices = summary.devices || {desktop:0, mobile:0, tablet:0, other:0};
-      const perf = summary.perfSummary || {};
-      const avgLcp = perf.avgLcp ? perf.avgLcp.toFixed(0) + " ms" : "n.d.";
 
-      const cards = [
-        { label: "Sessioni uniche", value: summary.uniqueSessions || 0 },
-        { label: "Visitatori unici", value: summary.uniqueVisitors || 0 },
-        { label: "Nuovi / di ritorno", value: (summary.newVisitors||0) + " / " + (summary.returningVisitors||0) },
-        { label: "Pageview", value: summary.pageviews || 0 },
-        { label: "Viste prodotto", value: summary.productViews || 0 },
-        { label: "Add to cart", value: summary.addToCart || 0 },
-        { label: "Carrelli attivi (reali)", value: summary.activeCarts || 0 },
-        { label: "Acquisti", value: summary.purchases || 0 },
-        { label: "Device (M/D/T)", value: (devices.mobile||0) + " / " + (devices.desktop||0) + " / " + (devices.tablet||0) },
-        { label: "Errori JS", value: summary.jsErrors || 0 },
-        { label: "Errori pagamento", value: summary.paymentErrors || 0 },
-        { label: "LCP medio", value: avgLcp }
-      ];
-
-      el.innerHTML = cards.map(c =>
-        '<div class="card">' +
-          '<div class="card-title">'+ esc(c.label) +'</div>' +
-          '<div class="card-value">'+ esc(c.value) +'</div>' +
-        '</div>'
-      ).join("");
-    }
-
-    function renderFunnel(summary) {
-      const el = document.getElementById("funnel");
-      const pv = summary.pageviews || 0;
-      const vp = summary.productViews || 0;
-      const atc = summary.addToCart || 0;
-      const pur = summary.purchases || 0;
-
-      function cr(from, to) {
-        if (!from) return "CR: 0.0%";
-        const val = (to / from) * 100;
-        return "CR: " + val.toFixed(1) + "%";
+  // ------------------ IDENTITÀ VISITATORE / SESSIONE ------------------
+  function getOrCreateVisitorId() {
+    try {
+      let id = localStorage.getItem("lpdc_visitor_id");
+      if (!id) {
+        id = "v_" + Math.random().toString(36).substr(2, 9) + Date.now();
+        localStorage.setItem("lpdc_visitor_id", id);
+        localStorage.setItem("lpdc_first_visit_at", new Date().toISOString());
       }
-
-      el.innerHTML = [
-        {
-          title: "Pageview",
-          value: pv,
-          cr: cr(pv, pur) + " → purchase"
-        },
-        {
-          title: "View product",
-          value: vp,
-          cr: cr(vp, atc) + " → add_to_cart"
-        },
-        {
-          title: "Add to cart",
-          value: atc,
-          cr: cr(atc, pur) + " → purchase"
-        },
-        {
-          title: "Purchase",
-          value: pur,
-          cr: ""
-        }
-      ].map(step =>
-        '<div class="funnel-step">' +
-          '<div class="funnel-step-title">'+ esc(step.title) +'</div>' +
-          '<div class="funnel-step-value">'+ esc(step.value) +'</div>' +
-          (step.cr ? '<div class="funnel-step-cr">'+ esc(step.cr) +'</div>' : '') +
-        '</div>'
-      ).join("");
+      return id;
+    } catch(e) {
+      return null;
     }
+  }
 
-    function renderCheckoutSteps(summary) {
-      const el = document.getElementById("checkoutSteps");
-      const steps = summary.checkoutSteps || {};
-      const order = ["cart","checkout","shipping","payment","thankyou"];
-      const labels = {
-        cart: "Carrello",
-        checkout: "Checkout",
-        shipping: "Spedizione",
-        payment: "Pagamento",
-        thankyou: "Ordine completato"
+  function getOrCreateSessionId() {
+    try {
+      let id = sessionStorage.getItem("lpdc_session_id");
+      if (!id) {
+        id = "s_" + Math.random().toString(36).substr(2, 9) + Date.now();
+        sessionStorage.setItem("lpdc_session_id", id);
+      }
+      return id;
+    } catch(e) {
+      return null;
+    }
+  }
+
+  const visitorId = getOrCreateVisitorId();
+  const sessionId = getOrCreateSessionId();
+
+  function getDaysSinceFirstVisit() {
+    try {
+      const first = localStorage.getItem("lpdc_first_visit_at");
+      if (!first) return null;
+      const t0 = new Date(first).getTime();
+      const t1 = Date.now();
+      return Math.round((t1 - t0) / (1000 * 60 * 60 * 24));
+    } catch(e) {
+      return null;
+    }
+  }
+
+  function isNewVisitorThisSession() {
+    try {
+      const flag = sessionStorage.getItem("lpdc_is_new_visitor");
+      if (flag === "0" || flag === "1") return flag === "1";
+
+      const first = localStorage.getItem("lpdc_first_visit_at");
+      const isNew = !first;
+      sessionStorage.setItem("lpdc_is_new_visitor", isNew ? "1" : "0");
+      if (isNew) {
+        localStorage.setItem("lpdc_first_visit_at", new Date().toISOString());
+      }
+      return isNew;
+    } catch(e) {
+      return false;
+    }
+  }
+
+  // ------------------ UTILS ------------------
+  function getDeviceType() {
+    const ua = navigator.userAgent || "";
+    if (/Mobile|Android|iP(hone|od)/i.test(ua)) return "mobile";
+    if (/iPad|Tablet/i.test(ua)) return "tablet";
+    return "desktop";
+  }
+
+  function parseUtm() {
+    const params = new URLSearchParams(window.location.search || "");
+    return {
+      utm_source: params.get("utm_source") || null,
+      utm_medium: params.get("utm_medium") || null,
+      utm_campaign: params.get("utm_campaign") || null
+    };
+  }
+
+  function sendEvent(payload) {
+    try {
+      const base = {
+        sessionId,
+        visitorId,
+        isNewVisitor: isNewVisitorThisSession(),
+        daysSinceFirstVisit: getDaysSinceFirstVisit(),
+        url: window.location.href,
+        path: window.location.pathname,
+        referrer: document.referrer || "",
+        deviceType: getDeviceType()
       };
+      const utm = parseUtm();
 
-      const entries = order
-        .filter(k => steps[k])
-        .map(k => [k, steps[k]]);
+      fetch(TRACKER_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        keepalive: true,
+        body: JSON.stringify(Object.assign({}, base, utm, payload))
+      }).catch(function(){});
+    } catch(e) {}
+  }
 
-      if (!entries.length) {
-        el.innerHTML = '<div class="card muted">Nessun dato checkout ancora disponibile.</div>';
-        return;
-      }
+  // Esporto per eventuali altri script
+  window.lpdcSendEvent = sendEvent;
 
-      el.innerHTML = entries.map(([step,count]) =>
-        '<div class="card">' +
-          '<div class="card-title">'+ esc(labels[step] || step) +'</div>' +
-          '<div class="card-value">'+ esc(count) +'</div>' +
-        '</div>'
-      ).join("");
-    }
+  // ------------------ PAGEVIEW + TIMEONPAGE ------------------
+  window.addEventListener("DOMContentLoaded", function() {
+    sendEvent({
+      type: "pageview",
+      title: document.title || ""
+    });
+  });
 
-    function renderTopPages(summary) {
-      const el = document.getElementById("topPages");
-      if (!summary.topPages || !summary.topPages.length) {
-        el.className = "card muted";
-        el.textContent = "Nessun dato sufficiente.";
-        return;
-      }
-      el.className = "card";
-      el.innerHTML = '<div class="card-title">Top pages (ultimi eventi)</div>' +
-        summary.topPages.map(p =>
-          '<div class="card-sub">'+ esc(p.path) +' – '+ esc(p.count) +' visite</div>'
-        ).join("");
-    }
-
-    function renderTrafficSources(summary) {
-      const el = document.getElementById("trafficSources");
-      if (!summary.topReferrers || !summary.topReferrers.length) {
-        el.className = "card muted";
-        el.textContent = "Nessun dato referrer disponibile.";
-        return;
-      }
-      el.className = "card";
-      el.innerHTML = '<div class="card-title">Fonti di traffico (referrer)</div>' +
-        summary.topReferrers.map(r =>
-          '<div class="card-sub">'+ esc(r.source) +' – '+ esc(r.count) +' pageview</div>'
-        ).join("");
-    }
-
-    function renderUtm(summary) {
-      const el = document.getElementById("utmSources");
-      if (!summary.utmCombos || !summary.utmCombos.length) {
-        el.className = "card muted";
-        el.textContent = "Nessuna UTM rilevata.";
-        return;
-      }
-      el.className = "card";
-      el.innerHTML = '<div class="card-title">UTM (ultime campagne)</div>' +
-        summary.utmCombos.map(u =>
-          '<div class="card-sub">source: <strong>'+ esc(u.source) +
-          '</strong> · medium: <strong>'+ esc(u.medium) +
-          '</strong> · campaign: <strong>'+ esc(u.campaign) +
-          '</strong> ('+ esc(u.count) +' pageview)</div>'
-        ).join("");
-    }
-
-    function renderProductInsights(summary) {
-      const catEl = document.getElementById("productCategories");
-      const gramsEl = document.getElementById("gramsViews");
-      const mediaEl = document.getElementById("mediaInteractions");
-
-      const categories = summary.productCategories || {};
-      const grams = summary.gramsViews || {};
-      const media = summary.mediaInteractions || {};
-
-      // categorie prodotto
-      if (!Object.keys(categories).length) {
-        catEl.className = "card muted";
-        catEl.textContent = "Nessun dato prodotti.";
-      } else {
-        catEl.className = "card";
-        catEl.innerHTML =
-          '<div class="card-title">Categorie prodotto più viste</div>' +
-          Object.entries(categories)
-            .sort((a,b) => b[1] - a[1])
-            .slice(0,5)
-            .map(([cat,cnt]) =>
-              '<div class="card-sub">'+ esc(cat) +' – '+ esc(cnt) +' viste</div>'
-            ).join("");
-      }
-
-      // grammi
-      if (!Object.keys(grams).length) {
-        gramsEl.className = "card muted";
-        gramsEl.textContent = "Nessun dato su grammi visualizzati.";
-      } else {
-        gramsEl.className = "card";
-        gramsEl.innerHTML =
-          '<div class="card-title">Formati (grammi) più visti</div>' +
-          Object.entries(grams)
-            .sort((a,b) => b[1] - a[1])
-            .slice(0,5)
-            .map(([g,cnt]) =>
-              '<div class="card-sub">'+ esc(g) +' g – '+ esc(cnt) +' viste</div>'
-            ).join("");
-      }
-
-      // media interaction
-      const totalMedia =
-        (media.imageOpen || 0) +
-        (media.imageZoom || 0) +
-        (media.videoPlay || 0) +
-        (media.videoEnd || 0);
-
-      if (!totalMedia) {
-        mediaEl.className = "card muted";
-        mediaEl.textContent = "Nessuna interazione media rilevata.";
-      } else {
-        mediaEl.className = "card";
-        mediaEl.innerHTML =
-          '<div class="card-title">Interazioni con immagini / video</div>' +
-          '<div class="card-sub">Immagini aperte: '+ esc(media.imageOpen || 0) +'</div>' +
-          '<div class="card-sub">Zoom immagini: '+ esc(media.imageZoom || 0) +'</div>' +
-          '<div class="card-sub">Video avviati: '+ esc(media.videoPlay || 0) +'</div>' +
-          '<div class="card-sub">Video terminati: '+ esc(media.videoEnd || 0) +'</div>';
-      }
-    }
-
-    function renderGeo(summary) {
-      const geoEl = document.getElementById("geoStats");
-      const countries = summary.countries || {};
-
-      if (!Object.keys(countries).length) {
-        geoEl.className = "card muted";
-        geoEl.textContent = "Nessun dato geografico.";
-        return;
-      }
-
-      geoEl.className = "card";
-      geoEl.innerHTML =
-        '<div class="card-title">Top paesi</div>' +
-        Object.entries(countries)
-          .sort((a,b) => b[1] - a[1])
-          .slice(0,5)
-          .map(([country,count]) =>
-            '<div class="card-sub">'+ esc(country) +' – '+ esc(count) +' visite</div>'
-          ).join("");
-    }
-
-    function renderTechHealth(summary) {
-      const el = document.getElementById("techHealth");
-      const perf = summary.perfSummary || {};
-      const formStats = summary.formStats || {submits:0, errors:0};
-
-      el.className = "card";
-      el.innerHTML =
-        '<div class="card-title">Salute tecnica</div>' +
-        '<div class="card-sub">Errori JS: <strong>'+ esc(summary.jsErrors || 0) +'</strong></div>' +
-        '<div class="card-sub">Errori pagamento: <strong>'+ esc(summary.paymentErrors || 0) +'</strong></div>' +
-        '<div class="card-sub">Invii form: <strong>'+ esc(formStats.submits || 0) +'</strong> · errori form: <strong>'+ esc(formStats.errors || 0) +'</strong></div>' +
-        '<div class="card-sub">LCP medio: <strong>'+ esc(perf.avgLcp ? perf.avgLcp.toFixed(0) + " ms" : "n.d.") +'</strong> · FCP: <strong>'+ esc(perf.avgFcp ? perf.avgFcp.toFixed(0) + " ms" : "n.d.") +'</strong> · TTFB: <strong>'+ esc(perf.avgTtfb ? perf.avgTtfb.toFixed(0) + " ms" : "n.d.") +'</strong></div>' +
-        '<div class="card-sub">Campioni performance: '+ esc(perf.samples || 0) +'</div>';
-    }
-
-    function formatDate(ts) {
-      if (!ts) return "";
-      const d = new Date(ts);
-      if (isNaN(d)) return esc(ts);
-      const dd = String(d.getDate()).padStart(2,"0");
-      const mm = String(d.getMonth()+1).padStart(2,"0");
-      const yyyy = d.getFullYear();
-      const hh = String(d.getHours()).padStart(2,"0");
-      const mi = String(d.getMinutes()).padStart(2,"0");
-      const ss = String(d.getSeconds()).padStart(2,"0");
-      return `${dd}/${mm}/${yyyy}, ${hh}:${mi}:${ss}`;
-    }
-
-    function buildDetails(ev) {
-      const p = ev.payload || {};
-      switch (p.type) {
-        case "timeonpage":
-          return "Durata: " + ((p.millis||0)/1000).toFixed(0) + "s";
-        case "scroll":
-          return "Profondità: " + (p.depth||0) + "%";
-        case "view_product":
-          return "Prodotto: " + (p.productTitle || p.productId || "");
-        case "add_to_cart":
-          return "Variant: " + (p.variantId||"") + " · qty: " + (p.quantity||1);
-        case "purchase":
-          return "Ordine: " + (p.orderId || "") + " · valore: " + (p.total || "");
-        case "cta_click":
-          return "CTA: " + (p.label || "") + " · testo: " + (p.text || "");
-        case "cart_state":
-          return "Items nel carrello: " + ((p.items && p.items.length) || 0) +
-                 (p.totalPrice ? " · valore: " + p.totalPrice + " " + (p.currency || "") : "");
-        case "checkout_step":
-          return "Step: " + (p.step || "") + (p.stepIndex ? " ("+p.stepIndex+")" : "");
-        case "media_interaction":
-          return "Media: " + (p.mediaType || "") + " · azione: " + (p.action || "");
-        case "form_interaction":
-          return "Form: " + (p.formId || "") + " · azione: " + (p.action || "");
-        case "js_error":
-          return "Errore JS: " + (p.message || "");
-        case "perf_metric":
-          return "Perf: LCP=" + (p.lcp||"") + "ms · FCP=" + (p.fcp||"") + "ms · TTFB=" + (p.ttfb||"") + "ms";
-        default:
-          return "";
-      }
-    }
-
-    function renderTable() {
-      const tbody = document.getElementById("eventsTableBody");
-      const typeFilter = document.getElementById("filterType").value;
-      const textFilter = document.getElementById("filterText").value.toLowerCase();
-      const timeFilter = document.getElementById("filterTime").value;
-
-      let rows = ALL_EVENTS;
-
-      // filtro temporale
-      if (timeFilter !== "all") {
-        const days = Number(timeFilter);
-        const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
-
-        rows = rows.filter(ev => {
-          const ts = new Date(ev.receivedAt || ev.payload?.ts).getTime();
-          return ts >= cutoff;
+  (function(){
+    let start = Date.now();
+    function flushTimeOnPage() {
+      const millis = Date.now() - start;
+      if (millis > 500) {
+        sendEvent({
+          type: "timeonpage",
+          millis: millis
         });
       }
+    }
+    window.addEventListener("beforeunload", flushTimeOnPage);
+    document.addEventListener("visibilitychange", function() {
+      if (document.visibilityState === "hidden") flushTimeOnPage();
+    });
+  })();
 
-      // filtro tipo
-      if (typeFilter !== "all") {
-        rows = rows.filter(ev => (ev.payload && ev.payload.type) === typeFilter);
-      }
+  // ------------------ VIEW_PRODUCT ENRICHED (solo pagina prodotto) ------------------
+  {% if template contains 'product' and product %}
+  window.addEventListener("DOMContentLoaded", function() {
+    var productData = {
+      id: {{ product.id | json }},
+      title: {{ product.title | json }},
+      price: {{ product.price | divided_by: 100.0 | json }},
+      type: {{ product.type | json }},
+      grams: {{ product.variants.first.weight | default: 0 | json }},
+      inStock: {{ product.available | json }},
+      currency: {{ shop.currency | json }}
+    };
 
-      // filtro testo
-      if (textFilter) {
-        rows = rows.filter(ev => {
-          const p = ev.payload || {};
-          const url = p.url || ev.path || "";
-          const hay =
-            (url || "") + " " +
-            (p.title || "") + " " +
-            (buildDetails(ev) || "");
-          return hay.toLowerCase().includes(textFilter);
+    sendEvent({
+      type: "view_product",
+      productId: productData.id,
+      productTitle: productData.title,
+      productCategory: productData.type,
+      grams: productData.grams,
+      productPrice: productData.price,
+      currency: productData.currency,
+      inStock: productData.inStock
+    });
+
+    // MEDIA INTERACTION (immagini/video prodotto)
+    try {
+      var images = document.querySelectorAll("img, [data-product-media]");
+      images.forEach(function(img, idx) {
+        img.addEventListener("click", function() {
+          sendEvent({
+            type: "media_interaction",
+            mediaType: "image",
+            action: "open",
+            productId: productData.id,
+            mediaPosition: idx + 1
+          });
         });
-      }
+      });
+      var vids = document.querySelectorAll("video");
+      vids.forEach(function(v, idx) {
+        v.addEventListener("play", function() {
+          sendEvent({
+            type: "media_interaction",
+            mediaType: "video",
+            action: "play",
+            productId: productData.id,
+            mediaPosition: idx + 1
+          });
+        });
+        v.addEventListener("ended", function() {
+          sendEvent({
+            type: "media_interaction",
+            mediaType: "video",
+            action: "end",
+            productId: productData.id,
+            mediaPosition: idx + 1
+          });
+        });
+      });
+    } catch(e) {}
+  });
+  {% endif %}
 
-      document.getElementById("rowsInfo").textContent =
-        rows.length + " eventi mostrati";
+  // ------------------ CART_STATE ------------------
+  async function sendCartState() {
+    try {
+      const res = await fetch("/cart.js", { credentials: "same-origin" });
+      if (!res.ok) return;
+      const cart = await res.json();
+      var items = (cart.items || []).map(function(item) {
+        return {
+          productId: item.product_id,
+          variantId: item.variant_id,
+          quantity: item.quantity,
+          productTitle: item.product_title,
+          linePrice: item.line_price / 100.0
+        };
+      });
 
-      tbody.innerHTML = rows.map(ev => {
-        const p = ev.payload || {};
-        const url = p.url || ev.path || "";
-        const typ = p.type || "";
-        return (
-          "<tr>" +
-            "<td>" + esc(formatDate(ev.receivedAt || p.ts)) + "</td>" +
-            "<td><span class='tag tag-green'>" + esc(typ) + "</span></td>" +
-            "<td>" + esc(url) + "</td>" +
-            "<td>" + esc(buildDetails(ev)) + "</td>" +
-          "</tr>"
-        );
-      }).join("");
+      sendEvent({
+        type: "cart_state",
+        items: items,
+        totalPrice: cart.total_price ? cart.total_price / 100.0 : 0,
+        currency: {{ shop.currency | json }}
+      });
+    } catch(e) {}
+  }
+
+  // ------------------ FETCH OVERRIDE (add_to_cart + cart_state) ------------------
+  (function() {
+    var origFetch = window.fetch;
+    if (typeof origFetch !== "function") return;
+
+    window.fetch = function(input, init) {
+      var p = origFetch(input, init);
+      try {
+        var url = typeof input === "string" ? input : (input.url || "");
+        var options = init || {};
+        var body = options.body;
+
+        // ADD TO CART (solo per /cart/add)
+        if (typeof url === "string" && url.indexOf("/cart/add") !== -1) {
+          var variantId = null;
+          var quantity = 1;
+
+          if (body instanceof FormData) {
+            variantId = body.get("id");
+            quantity = Number(body.get("quantity") || 1);
+          } else if (typeof body === "string") {
+            try {
+              var data = JSON.parse(body);
+              variantId = data.id || data.variant_id;
+              quantity = data.quantity || 1;
+            } catch(e) {}
+          }
+
+          if (variantId) {
+            sendEvent({
+              type: "add_to_cart",
+              variantId: variantId,
+              quantity: quantity
+            });
+          }
+        }
+
+        // Qualsiasi modifica al carrello → aggiorna cart_state
+        if (
+          typeof url === "string" && (
+            url.indexOf("/cart/add")   !== -1 ||
+            url.indexOf("/cart/change")!== -1 ||
+            url.indexOf("/cart/update")!== -1 ||
+            url.indexOf("/cart/clear") !== -1 ||
+            url.endsWith("/cart.js")
+          )
+        ) {
+          setTimeout(sendCartState, 500);
+        }
+      } catch(e) {}
+
+      return p;
+    };
+  })();
+
+  // Optional: refresh periodico molto lento (o commentalo del tutto)
+  // setInterval(sendCartState, 60000); // ogni 60s se vuoi
+
+  // ------------------ CHECKOUT_STEP (best-effort) ------------------
+  function detectCheckoutStep() {
+    var path = window.location.pathname || "";
+    var step = null;
+    var index = null;
+
+    if (path.indexOf("/cart") !== -1) {
+      step = "cart"; index = 1;
+    } else if (path.indexOf("/checkout") !== -1) {
+      step = "checkout"; index = 2;
+    } else if (path.indexOf("/thank_you") !== -1 || path.indexOf("/thank-you") !== -1) {
+      step = "thankyou"; index = 5;
     }
 
-    function loadAll() {
-      Promise.all([
-        fetch("/api/summary").then(r => r.json()),
-        fetch("/api/events?limit=300").then(r => r.json())
-      ]).then(([summary, events]) => {
-        summary = summary || {};
-        ALL_EVENTS = events || [];
-        renderOverview(summary);
-        renderFunnel(summary);
-        renderCheckoutSteps(summary);
-        renderTopPages(summary);
-        renderTrafficSources(summary);
-        renderUtm(summary);
-        renderProductInsights(summary);
-        renderGeo(summary);
-        renderTechHealth(summary);
-        renderTable();
-      }).catch(err => {
-        console.error("Errore nel caricamento della dashboard", err);
+    if (step) {
+      sendEvent({
+        type: "checkout_step",
+        step: step,
+        stepIndex: index,
+        cartValue: null,
+        currency: {{ shop.currency | json }}
       });
     }
+  }
+  detectCheckoutStep();
 
-    document.getElementById("filterType").addEventListener("change", renderTable);
-    document.getElementById("filterText").addEventListener("input", function() {
-      clearTimeout(window._lpdcFilterTimer);
-      window._lpdcFilterTimer = setTimeout(renderTable, 120);
+  // ------------------ FORM / NEWSLETTER ------------------
+  window.addEventListener("DOMContentLoaded", function() {
+    var forms = document.querySelectorAll("form");
+    forms.forEach(function(form) {
+      var formId = form.getAttribute("id") || form.getAttribute("name") || "form_generic";
+
+      form.addEventListener("submit", function() {
+        sendEvent({
+          type: "form_interaction",
+          formId: formId,
+          action: "submit"
+        });
+      });
+
+      form.addEventListener("focusin", function() {
+        sendEvent({
+          type: "form_interaction",
+          formId: formId,
+          action: "focus"
+        });
+      });
     });
-    document.getElementById("filterTime").addEventListener("change", renderTable);
+  });
 
-    loadAll();
-    // se vuoi alleggerire il server, puoi aumentare questo intervallo o commentarlo
-    setInterval(loadAll, 30000);
-  </script>
+  // ------------------ JS ERROR & PROMISE ERROR ------------------
+  window.addEventListener("error", function(e) {
+    try {
+      sendEvent({
+        type: "js_error",
+        message: e.message || "",
+        source: (e.filename || "").toString(),
+        line: e.lineno || null,
+        col: e.colno || null
+      });
+    } catch(_){}
+  });
+
+  window.addEventListener("unhandledrejection", function(e) {
+    try {
+      sendEvent({
+        type: "js_error",
+        message: (e.reason && e.reason.message) ? e.reason.message : "unhandledrejection",
+        source: "promise",
+        line: null,
+        col: null
+      });
+    } catch(_){}
+  });
+
+  // ------------------ PERFORMANCE METRICS ------------------
+  (function() {
+    function sendPerf() {
+      try {
+        var perf = window.performance;
+        if (!perf) return;
+
+        var ttfb = 0;
+        if (perf.getEntriesByType) {
+          var navEntries = perf.getEntriesByType("navigation");
+          if (navEntries && navEntries[0]) {
+            ttfb = navEntries[0].responseStart;
+          }
+        }
+
+        var fcp = 0;
+        var lcp = 0;
+        if ("getEntriesByType" in perf) {
+          var paints = perf.getEntriesByType("paint") || [];
+          paints.forEach(function(p) {
+            if (p.name === "first-contentful-paint") {
+              fcp = p.startTime;
+            }
+          });
+        }
+
+        if ("PerformanceObserver" in window) {
+          try {
+            var po = new PerformanceObserver(function(list) {
+              var entries = list.getEntries();
+              entries.forEach(function(entry) {
+                if (entry.entryType === "largest-contentful-paint") {
+                  lcp = entry.startTime;
+                }
+              });
+            });
+            po.observe({ type: "largest-contentful-paint", buffered: true });
+          } catch(e) {}
+        }
+
+        setTimeout(function() {
+          sendEvent({
+            type: "perf_metric",
+            lcp: lcp || null,
+            fcp: fcp || null,
+            ttfb: ttfb || null
+          });
+        }, 2000);
+      } catch(e) {}
+    }
+
+    if (document.readyState === "complete") {
+      sendPerf();
+    } else {
+      window.addEventListener("load", function() {
+        sendPerf();
+      });
+    }
+  })();
+
+})();
+</script>
+
 </body>
 </html>
