@@ -136,29 +136,42 @@ app.get("/api/events", async (req, res) => {
 // ------------------ /api/summary: numeri per la dashboard ------------------
 app.get("/api/summary", async (req, res) => {
   try {
-    // se la tabella cresce molto, puoi mettere un limite: readLastEvents(50000)
+    // leggi al massimo 500 eventi recenti per evitare di saturare la memoria
     const events = await readLastEvents(500);
 
     const stats = {
       totalEvents: events.length,
+
+      // funnel
       pageviews: 0,
       timeonpageEvents: 0,
       productViews: 0,
       addToCart: 0,
       purchases: 0,
 
+      // visitatori / sessioni
       uniqueSessions: new Set(),
       uniqueVisitors: new Set(),
       newVisitors: 0,
       returningVisitors: 0,
 
+      // device
       devices: { desktop: 0, mobile: 0, tablet: 0, other: 0 },
 
+      // blocchi dashboard
       topPages: {},
       referrers: {},
       utmCombos: {},
-
-      latestCartByVisitor: new Map(), // per carrelli attivi
+      checkoutSteps: { cart: 0, checkout: 0, shipping: 0, payment: 0, thankyou: 0 },
+      activeCartsByVisitor: new Map(),
+      productCategories: {},
+      gramsViews: {},
+      mediaInteractions: {},
+      countries: {},
+      formStats: {},
+      jsErrors: 0,
+      paymentErrors: 0,
+      perfSamples: [],
     };
 
     events.forEach((ev) => {
@@ -177,25 +190,25 @@ app.get("/api/summary", async (req, res) => {
       if (sessionId) stats.uniqueSessions.add(sessionId);
       if (visitorId) stats.uniqueVisitors.add(visitorId);
 
+      // nuovi vs di ritorno (conteggiati sulle pageview)
       if (type === "pageview") {
         if (isNewVisitor) stats.newVisitors++;
         else stats.returningVisitors++;
       }
 
-      if (
-        deviceType === "desktop" ||
-        deviceType === "mobile" ||
-        deviceType === "tablet"
-      ) {
+      // device
+      if (deviceType === "desktop" || deviceType === "mobile" || deviceType === "tablet") {
         stats.devices[deviceType]++;
       } else {
         stats.devices.other++;
       }
 
+      // top pages
       if (path) {
         stats.topPages[path] = (stats.topPages[path] || 0) + 1;
       }
 
+      // referrer solo sulle pageview
       if (type === "pageview") {
         let key = "Direct / none";
         if (ref && ref !== "") {
@@ -209,6 +222,7 @@ app.get("/api/summary", async (req, res) => {
         stats.referrers[key] = (stats.referrers[key] || 0) + 1;
       }
 
+      // UTM solo sulle pageview
       if (type === "pageview") {
         const s = utmSource || "(none)";
         const m = utmMedium || "(none)";
@@ -217,33 +231,82 @@ app.get("/api/summary", async (req, res) => {
         stats.utmCombos[comboKey] = (stats.utmCombos[comboKey] || 0) + 1;
       }
 
-      // conteggi base
+      // conteggi funnel
       if (type === "pageview") stats.pageviews++;
       else if (type === "timeonpage") stats.timeonpageEvents++;
       else if (type === "view_product") stats.productViews++;
       else if (type === "add_to_cart") stats.addToCart++;
       else if (type === "purchase") stats.purchases++;
 
-      // carrelli attivi
+      // checkout steps
+      if (type === "checkout_step") {
+        const step = p.step || "checkout";
+        if (stats.checkoutSteps[step] !== undefined) {
+          stats.checkoutSteps[step]++;
+        }
+      }
+
+      // carrelli attivi reali
       if (type === "cart_state" && visitorId) {
-        stats.latestCartByVisitor.set(visitorId, p.items || []);
+        const items = Array.isArray(p.items) ? p.items : [];
+        stats.activeCartsByVisitor.set(visitorId, items);
+      }
+
+      // prodotti: categorie e grammi
+      if (type === "view_product") {
+        const cat = p.productCategory || "Altro";
+        const grams = p.grams || 0;
+        stats.productCategories[cat] = (stats.productCategories[cat] || 0) + 1;
+        const gramsKey = String(grams);
+        stats.gramsViews[gramsKey] = (stats.gramsViews[gramsKey] || 0) + 1;
+      }
+
+      // media interaction
+      if (type === "media_interaction") {
+        const key = `${p.mediaType || "media"}:${p.action || "action"}`;
+        stats.mediaInteractions[key] = (stats.mediaInteractions[key] || 0) + 1;
+      }
+
+      // geo
+      if (p.country) {
+        stats.countries[p.country] = (stats.countries[p.country] || 0) + 1;
+      }
+
+      // form
+      if (type === "form_interaction") {
+        const formId = p.formId || "generic";
+        const action = p.action || "submit";
+        const key = `${formId}:${action}`;
+        stats.formStats[key] = (stats.formStats[key] || 0) + 1;
+      }
+
+      // errori JS / pagamenti
+      if (type === "js_error") {
+        stats.jsErrors++;
+        const msg = (p.message || "").toLowerCase();
+        if (msg.includes("payment") || msg.includes("stripe") || msg.includes("paypal")) {
+          stats.paymentErrors++;
+        }
+      }
+
+      // performance
+      if (type === "perf_metric") {
+        stats.perfSamples.push({
+          lcp: typeof p.lcp === "number" ? p.lcp : null,
+          fcp: typeof p.fcp === "number" ? p.fcp : null,
+          ttfb: typeof p.ttfb === "number" ? p.ttfb : null,
+        });
       }
     });
 
     const sessionsCount = stats.uniqueSessions.size || 1;
 
     const crProductToCart =
-      stats.productViews > 0
-        ? (stats.addToCart / stats.productViews) * 100
-        : 0;
+      stats.productViews > 0 ? (stats.addToCart / stats.productViews) * 100 : 0;
     const crCartToPurchase =
-      stats.addToCart > 0
-        ? (stats.purchases / stats.addToCart) * 100
-        : 0;
+      stats.addToCart > 0 ? (stats.purchases / stats.addToCart) * 100 : 0;
     const crPageviewToPurchase =
-      stats.pageviews > 0
-        ? (stats.purchases / stats.pageviews) * 100
-        : 0;
+      stats.pageviews > 0 ? (stats.purchases / stats.pageviews) * 100 : 0;
 
     const topPagesArray = Object.entries(stats.topPages)
       .sort((a, b) => b[1] - a[1])
@@ -263,10 +326,31 @@ app.get("/api/summary", async (req, res) => {
         return { source: s, medium: m, campaign: c, count };
       });
 
-    // carrelli attivi: quanti visitor hanno items.length > 0
+    // carrelli attivi = visitor con almeno 1 item nel carrello
     let activeCarts = 0;
-    for (const [, items] of stats.latestCartByVisitor.entries()) {
+    stats.activeCartsByVisitor.forEach((items) => {
       if (Array.isArray(items) && items.length > 0) activeCarts++;
+    });
+
+    // performance media
+    let perfSummary = { avgLcp: null, avgFcp: null, avgTtfb: null, samples: 0 };
+    if (stats.perfSamples.length > 0) {
+      const validLcp = stats.perfSamples.map(s => s.lcp).filter(x => typeof x === "number");
+      const validFcp = stats.perfSamples.map(s => s.fcp).filter(x => typeof x === "number");
+      const validTtfb = stats.perfSamples.map(s => s.ttfb).filter(x => typeof x === "number");
+
+      function avg(arr) {
+        if (!arr.length) return null;
+        const sum = arr.reduce((a, b) => a + b, 0);
+        return sum / arr.length;
+      }
+
+      perfSummary = {
+        avgLcp: avg(validLcp),
+        avgFcp: avg(validFcp),
+        avgTtfb: avg(validTtfb),
+        samples: stats.perfSamples.length,
+      };
     }
 
     res.json({
@@ -276,37 +360,35 @@ app.get("/api/summary", async (req, res) => {
       productViews: stats.productViews,
       addToCart: stats.addToCart,
       purchases: stats.purchases,
+
       uniqueSessions: sessionsCount,
       uniqueVisitors: stats.uniqueVisitors.size,
       newVisitors: stats.newVisitors,
       returningVisitors: stats.returningVisitors,
       devices: stats.devices,
+
       crProductToCart,
       crCartToPurchase,
       crPageviewToPurchase,
+
       topPages: topPagesArray,
       topReferrers: topReferrersArray,
       utmCombos: utmArray,
+
       activeCarts,
+      checkoutSteps: stats.checkoutSteps,
+      productCategories: stats.productCategories,
+      gramsViews: stats.gramsViews,
+      mediaInteractions: stats.mediaInteractions,
+      countries: stats.countries,
+      formStats: stats.formStats,
+      jsErrors: stats.jsErrors,
+      paymentErrors: stats.paymentErrors,
+      perfSummary,
     });
   } catch (err) {
-    console.error("Errore in /api/summary:", err);
+    console.error("Error in /api/summary", err);
     res.status(500).json({ ok: false });
-  }
-});
-
-// ------------------ ENDPOINT ADMIN (facoltativi) ------------------
-app.get("/admin/reset-db", async (req, res) => {
-  const token = req.query.token;
-  if (token !== RESET_TOKEN) {
-    return res.status(403).send("Accesso negato");
-  }
-  try {
-    await pool.query("TRUNCATE TABLE events RESTART IDENTITY;");
-    res.send("Database eventi azzerato.");
-  } catch (err) {
-    console.error("Errore reset DB:", err);
-    res.status(500).send("Errore nel cancellare gli eventi.");
   }
 });
 
