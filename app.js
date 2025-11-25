@@ -10,14 +10,15 @@ const RESET_TOKEN = "LAPERLE_RESET_2024";
 // ------------------ MIDDLEWARE ------------------
 app.use(
   cors({
-    origin: true, // accetta richieste da qualunque origine (Shopify + dashboard)
+    origin: true,
     methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type"],
   })
 );
 
-app.options("*", cors());
+// NON serve app.options("*", ...) – la CORS middleware sopra gestisce già le OPTIONS
 app.use(express.json());
+
 
 // dashboard statica
 app.use("/dashboard", express.static(path.join(__dirname, "dashboard")));
