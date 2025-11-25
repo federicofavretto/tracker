@@ -1,808 +1,375 @@
-const express = require("express");
-const cors = require("cors");
-const fs = require("fs");
-const path = require("path");
+<script>
+(function() {
+  const TRACKER_ENDPOINT = "https://tracker-mhw8.onrender.com/collect";
 
-const app = express();
-const RESET_TOKEN = "LAPERLE_RESET_2024"; // scegli tu la parola
-const pool = require('./db');   // <-- importa il pool di Postgres
-
-/**
- * CORS – consenti SOLO i tuoi domini
- */
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      if (!origin) return callback(null, true); // richieste server-side
-
-      const allowedOrigins = [
-        "https://laperleducaviar.com",
-        "https://laperleducaviar.myshopify.com",
-        "https://laperledu-caviar.myshopify.com", // visto nei log
-      ];
-
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
+  // ------------------ IDENTITÀ VISITATORE / SESSIONE ------------------
+  function getOrCreateVisitorId() {
+    try {
+      let id = localStorage.getItem("lpdc_visitor_id");
+      if (!id) {
+        id = "v_" + Math.random().toString(36).substr(2, 9) + Date.now();
+        localStorage.setItem("lpdc_visitor_id", id);
+        localStorage.setItem("lpdc_first_visit_at", new Date().toISOString());
       }
-      return callback(new Error("Not allowed by CORS: " + origin));
-    },
-    methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type"],
-  })
-);
-
-app.options("/collect", cors());
-app.options("/api/events", cors());
-app.options("/api/summary", cors());
-
-app.use(express.json());
-app.use("/dashboard", express.static(path.join(__dirname, "dashboard")));
-
-/**
- * Helpers logging
- */
-
-function ensureLogsDir() {
-  const logsDir = path.join(__dirname, "logs");
-  if (!fs.existsSync(logsDir)) {
-    fs.mkdirSync(logsDir);
-  }
-  return logsDir;
-}
-
-function clearAllLogs() {
-  const logsDir = ensureLogsDir();
-  const files = fs.readdirSync(logsDir);
-  files.forEach((file) => {
-    if (file.startsWith("visitors-") && file.endsWith(".log")) {
-      fs.unlinkSync(path.join(logsDir, file));
+      return id;
+    } catch(e) {
+      return null;
     }
+  }
+
+  function getOrCreateSessionId() {
+    try {
+      let id = sessionStorage.getItem("lpdc_session_id");
+      if (!id) {
+        id = "s_" + Math.random().toString(36).substr(2, 9) + Date.now();
+        sessionStorage.setItem("lpdc_session_id", id);
+      }
+      return id;
+    } catch(e) {
+      return null;
+    }
+  }
+
+  const visitorId = getOrCreateVisitorId();
+  const sessionId = getOrCreateSessionId();
+
+  function getDaysSinceFirstVisit() {
+    try {
+      const first = localStorage.getItem("lpdc_first_visit_at");
+      if (!first) return null;
+      const t0 = new Date(first).getTime();
+      const t1 = Date.now();
+      return Math.round((t1 - t0) / (1000 * 60 * 60 * 24));
+    } catch(e) {
+      return null;
+    }
+  }
+
+  function isNewVisitorThisSession() {
+    try {
+      const flag = sessionStorage.getItem("lpdc_is_new_visitor");
+      if (flag === "0" || flag === "1") return flag === "1";
+
+      const first = localStorage.getItem("lpdc_first_visit_at");
+      const isNew = !first;
+      sessionStorage.setItem("lpdc_is_new_visitor", isNew ? "1" : "0");
+      if (isNew) {
+        localStorage.setItem("lpdc_first_visit_at", new Date().toISOString());
+      }
+      return isNew;
+    } catch(e) {
+      return false;
+    }
+  }
+
+  // ------------------ UTILS ------------------
+  function getDeviceType() {
+    const ua = navigator.userAgent || "";
+    if (/Mobile|Android|iP(hone|od)/i.test(ua)) return "mobile";
+    if (/iPad|Tablet/i.test(ua)) return "tablet";
+    return "desktop";
+  }
+
+  function parseUtm() {
+    const params = new URLSearchParams(window.location.search || "");
+    return {
+      utm_source: params.get("utm_source") || null,
+      utm_medium: params.get("utm_medium") || null,
+      utm_campaign: params.get("utm_campaign") || null
+    };
+  }
+
+  function sendEvent(payload) {
+    try {
+      const base = {
+        sessionId,
+        visitorId,
+        isNewVisitor: isNewVisitorThisSession(),
+        daysSinceFirstVisit: getDaysSinceFirstVisit(),
+        url: window.location.href,
+        path: window.location.pathname,
+        referrer: document.referrer || "",
+        deviceType: getDeviceType()
+      };
+      const utm = parseUtm();
+
+      fetch(TRACKER_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        keepalive: true,
+        body: JSON.stringify(Object.assign({}, base, utm, payload))
+      }).catch(function(){});
+    } catch(e) {}
+  }
+
+  // ------------------ PAGEVIEW + TIMEONPAGE ------------------
+  window.addEventListener("DOMContentLoaded", function() {
+    sendEvent({
+      type: "pageview",
+      title: document.title || ""
+    });
   });
-}
 
-function getLogFilePath(date = new Date()) {
-  const logsDir = ensureLogsDir();
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  return path.join(logsDir, `visitors-${yyyy}-${mm}-${dd}.log`);
-}
-
-function anonymizeIp(ip) {
-  if (!ip) return "";
-  const parts = ip.split(".");
-  if (parts.length === 4) {
-    parts[3] = "0";
-    return parts.join(".");
-  }
-  return ip;
-}
-
-function logEvent(entry) {
-  const logPath = getLogFilePath();
-  fs.appendFile(logPath, JSON.stringify(entry) + "\n", () => {});
-}
-
-/**
- * /collect – endpoint principale
- * type:
- *  - pageview
- *  - timeonpage
- *  - view_product
- *  - add_to_cart
- *  - purchase
- */
-app.post("/collect", async (req, res) => {
-  const clientIp =
-    req.headers["x-forwarded-for"]?.split(",")[0] ||
-    req.socket.remoteAddress;
-
-  const entry = {
-    receivedAt: new Date().toISOString(),
-    ip: anonymizeIp(clientIp),
-    userAgent: req.headers["user-agent"] || "",
-    payload: req.body,
-  };
-
-  console.log("Evento /collect:", entry.payload);
-  logEvent(entry); // continuiamo anche a loggare su file, se vuoi
-
-  try {
-    await pool.query(
-      `INSERT INTO events (occurred_at, ip, user_agent, payload)
-       VALUES ($1, $2, $3, $4)`,
-      [entry.receivedAt, entry.ip, entry.userAgent, entry.payload]
-    );
-  } catch (err) {
-    console.error('Error inserting event into Postgres', err);
-    // NON blocchiamo la risposta al browser
-  }
-
-  res.status(204).end();
-});
-
-
-app.post('/api/track', async (req, res) => {
-  try {
-    const { event_type, url, session_id, meta } = req.body;
-
-    await pool.query(
-      `INSERT INTO events (event_type, url, session_id, user_agent, meta)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [
-        event_type,
-        url || null,
-        session_id || null,
-        req.headers['user-agent'] || null,
-        meta || {}
-      ]
-    );
-
-    res.status(201).json({ ok: true });
-  } catch (err) {
-    console.error('Error inserting event', err);
-    res.status(500).json({ ok: false });
-  }
-});
-
-/**
- * Legge gli ultimi N eventi dai file log (partendo dai più recenti)
- */
-async function readLastEvents(limit = null) {
-  let query = `
-    SELECT occurred_at, ip, user_agent, payload
-    FROM events
-    ORDER BY occurred_at DESC
-  `;
-  const params = [];
-
-  if (limit) {
-    query += ' LIMIT $1';
-    params.push(limit);
-  }
-
-  const result = await pool.query(query, params);
-
-  return result.rows.map(row => ({
-    receivedAt: row.occurred_at,
-    ip: row.ip,
-    userAgent: row.user_agent,
-    payload: row.payload
-  }));
-}
-
-
-
-/**
- * /api/events – per tabella dettagli
- */
-app.get('/api/events', async (req, res) => {
-  const limit = Number(req.query.limit) || 300;
-  const range = req.query.range || null; // '7d', '30d', ecc.
-
-  const ranges = {
-    '7d':   "NOW() - INTERVAL '7 days'",
-    '30d':  "NOW() - INTERVAL '30 days'",
-    '90d':  "NOW() - INTERVAL '90 days'",
-    '180d': "NOW() - INTERVAL '180 days'",
-    '365d': "NOW() - INTERVAL '365 days'"
-  };
-
-  try {
-    let whereClause = '';
-    const params = [limit];
-
-    if (range && ranges[range]) {
-      whereClause = `WHERE occurred_at >= ${ranges[range]}`;
+  (function(){
+    let start = Date.now();
+    function flushTimeOnPage() {
+      const millis = Date.now() - start;
+      if (millis > 500) {
+        sendEvent({
+          type: "timeonpage",
+          millis: millis
+        });
+      }
     }
+    window.addEventListener("beforeunload", flushTimeOnPage);
+    document.addEventListener("visibilitychange", function() {
+      if (document.visibilityState === "hidden") flushTimeOnPage();
+    });
+  })();
 
-    const query = `
-      SELECT occurred_at, ip, user_agent, payload
-      FROM events
-      ${whereClause}
-      ORDER BY occurred_at DESC
-      LIMIT $1
-    `;
-
-    const result = await pool.query(query, params);
-
-    const events = result.rows.map(row => ({
-      receivedAt: row.occurred_at,
-      ip: row.ip,
-      userAgent: row.user_agent,
-      payload: row.payload
-    }));
-
-    res.json(events);
-  } catch (err) {
-    console.error('Error fetching events', err);
-    res.status(500).json({ ok: false });
-  }
-});
-
-
-
-/**
- * /api/summary – statistiche per la dashboard (funnel)
- * calcolate su tutti gli eventi (puoi regolare inserendo un numero tra le parentesi di readlastevent)
- */
-app.get("/api/summary", async (req, res) => {
-  try {
-    const events = await readLastEvents(3000);  // tutti gli eventi (cumulativo)
-
-    const stats = {
-      totalEvents: events.length,
-      pageviews: 0,
-      timeonpageEvents: 0,
-      productViews: 0,
-      addToCart: 0,
-      purchases: 0,
-      uniqueSessions: new Set(),
-      uniqueVisitors: new Set(),
-      newVisitors: 0,
-      returningVisitors: 0,
-      devices: { desktop: 0, mobile: 0, tablet: 0, other: 0 },
-      topPages: {},
-      referrers: {},
-      utmCombos: {},
-      // 🔴 NUOVO: carrelli attivi in tempo reale
-      latestCartByVisitor: new Map()
+  // ------------------ VIEW_PRODUCT ENRICHED (solo pagina prodotto) ------------------
+  {% if template contains 'product' and product %}
+  window.addEventListener("DOMContentLoaded", function() {
+    var productData = {
+      id: {{ product.id | json }},
+      title: {{ product.title | json }},
+      price: {{ product.price | divided_by: 100.0 | json }},
+      type: {{ product.type | json }},
+      grams: {{ product.variants.first.weight | default: 0 | json }},
+      inStock: {{ product.available | json }},
+      currency: {{ shop.currency | json }}
     };
 
-    events.forEach((ev) => {
-      const p = ev.payload || {};
-      const type = p.type;
-      const sessionId = p.sessionId || null;
-      const visitorId = p.visitorId || null;
-      const isNewVisitor = p.isNewVisitor === true;
-      const path = p.path || p.url || "";
-      const ref = p.referrer || "";
-      const utmSource = p.utm_source || "";
-      const utmMedium = p.utm_medium || "";
-      const utmCampaign = p.utm_campaign || "";
-      const deviceType = p.deviceType || "other";
-
-      if (sessionId) stats.uniqueSessions.add(sessionId);
-      if (visitorId) stats.uniqueVisitors.add(visitorId);
-
-      if (type === "pageview") {
-        if (isNewVisitor) stats.newVisitors++;
-        else stats.returningVisitors++;
-      }
-
-      if (deviceType === "desktop" || deviceType === "mobile" || deviceType === "tablet") {
-        stats.devices[deviceType]++;
-      } else {
-        stats.devices.other++;
-      }
-
-      if (path) {
-        stats.topPages[path] = (stats.topPages[path] || 0) + 1;
-      }
-
-      if (type === "pageview") {
-        let key = "Direct / none";
-        if (ref && ref !== "") {
-          try {
-            const url = new URL(ref);
-            key = url.hostname;
-          } catch (e) {
-            key = ref;
-          }
-        }
-        stats.referrers[key] = (stats.referrers[key] || 0) + 1;
-      }
-
-      if (type === "pageview") {
-        const s = utmSource || "(none)";
-        const m = utmMedium || "(none)";
-        const c = utmCampaign || "(none)";
-        const comboKey = `${s}|${m}|${c}`;
-        stats.utmCombos[comboKey] = (stats.utmCombos[comboKey] || 0) + 1;
-      }
-
-      // Eventi cumulativi
-      if (type === "pageview") stats.pageviews++;
-      else if (type === "timeonpage") stats.timeonpageEvents++;
-      else if (type === "view_product") stats.productViews++;
-      else if (type === "add_to_cart") stats.addToCart++;
-      else if (type === "purchase") stats.purchases++;
-
-      // 🔴 QUI: gestione stato carrello (metodo 2)
-      // ci aspettiamo eventi tipo:
-      // { type: "cart_state", visitorId: "xxx", items: [ {variantId, quantity}, ... ] }
-      if (type === "cart_state" && visitorId) {
-        stats.latestCartByVisitor.set(visitorId, p.items || []);
-      }
+    sendEvent({
+      type: "view_product",
+      productId: productData.id,
+      productTitle: productData.title,
+      productCategory: productData.type,
+      grams: productData.grams,
+      productPrice: productData.price,
+      currency: productData.currency,
+      inStock: productData.inStock
     });
 
-    const sessionsCount = stats.uniqueSessions.size || 1;
+    // MEDIA INTERACTION (immagini/video prodotto)
+    try {
+      var images = document.querySelectorAll("img, [data-product-media]");
+      images.forEach(function(img, idx) {
+        img.addEventListener("click", function() {
+          sendEvent({
+            type: "media_interaction",
+            mediaType: "image",
+            action: "open",
+            productId: productData.id,
+            mediaPosition: idx + 1
+          });
+        });
+      });
+      var vids = document.querySelectorAll("video");
+      vids.forEach(function(v, idx) {
+        v.addEventListener("play", function() {
+          sendEvent({
+            type: "media_interaction",
+            mediaType: "video",
+            action: "play",
+            productId: productData.id,
+            mediaPosition: idx + 1
+          });
+        });
+        v.addEventListener("ended", function() {
+          sendEvent({
+            type: "media_interaction",
+            mediaType: "video",
+            action: "end",
+            productId: productData.id,
+            mediaPosition: idx + 1
+          });
+        });
+      });
+    } catch(e) {}
+  });
+  {% endif %}
 
-    const crProductToCart =
-      stats.productViews > 0 ? (stats.addToCart / stats.productViews) * 100 : 0;
-    const crCartToPurchase =
-      stats.addToCart > 0 ? (stats.purchases / stats.addToCart) * 100 : 0;
-    const crPageviewToPurchase =
-      stats.pageviews > 0 ? (stats.purchases / stats.pageviews) * 100 : 0;
-
-    const topPagesArray = Object.entries(stats.topPages)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([path, count]) => ({ path, count }));
-
-    const topReferrersArray = Object.entries(stats.referrers)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([source, count]) => ({ source, count }));
-
-    const utmArray = Object.entries(stats.utmCombos)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([combo, count]) => {
-        const [s, m, c] = combo.split("|");
-        return { source: s, medium: m, campaign: c, count };
+  // ------------------ CART_STATE + INTERCETTARE /cart ------------------
+  async function sendCartState() {
+    try {
+      const res = await fetch("/cart.js", { credentials: "same-origin" });
+      if (!res.ok) return;
+      const cart = await res.json();
+      var items = (cart.items || []).map(function(item) {
+        return {
+          productId: item.product_id,
+          variantId: item.variant_id,
+          quantity: item.quantity,
+          productTitle: item.product_title,
+          linePrice: item.line_price / 100.0
+        };
       });
 
-    // 🔴 Calcolo carrelli attivi: quanti visitor hanno items.length > 0
-    let activeCarts = 0;
-    for (const [, items] of stats.latestCartByVisitor.entries()) {
-      if (Array.isArray(items) && items.length > 0) activeCarts++;
+      sendEvent({
+        type: "cart_state",
+        items: items,
+        totalPrice: cart.total_price ? cart.total_price / 100.0 : 0,
+        currency: {{ shop.currency | json }}
+      });
+    } catch(e) {}
+  }
+
+  // wrap fetch per intercettare cambi carrello
+  (function() {
+    var origFetch = window.fetch;
+    window.fetch = function(input, init) {
+      return origFetch(input, init).then(function(resp) {
+        try {
+          var url = typeof input === "string" ? input : (input.url || "");
+          if (url.indexOf("/cart") !== -1) {
+            setTimeout(sendCartState, 300);
+          }
+        } catch(e) {}
+        return resp;
+      });
+    };
+  })();
+
+  // fallback: aggiorna cart_state ogni tanto
+  setInterval(sendCartState, 20000);
+
+  // ------------------ CHECKOUT_STEP (solo lato URL, best effort) ------------------
+  function detectCheckoutStep() {
+    var path = window.location.pathname || "";
+    var step = null;
+    var index = null;
+
+    if (path.indexOf("/cart") !== -1) {
+      step = "cart"; index = 1;
+    } else if (path.indexOf("/checkout") !== -1) {
+      // senza accesso a step Shopify, usiamo un best-effort
+      step = "checkout"; index = 2;
+    } else if (path.indexOf("/thank_you") !== -1 || path.indexOf("/thank-you") !== -1) {
+      step = "thankyou"; index = 5;
     }
 
-    res.json({
-      totalEvents: stats.totalEvents,
-      pageviews: stats.pageviews,
-      timeonpageEvents: stats.timeonpageEvents,
-      productViews: stats.productViews,
-      addToCart: stats.addToCart,      // cumulativo
-      purchases: stats.purchases,
-      uniqueSessions: sessionsCount,
-      uniqueVisitors: stats.uniqueVisitors.size,
-      newVisitors: stats.newVisitors,
-      returningVisitors: stats.returningVisitors,
-      devices: stats.devices,
-      crProductToCart,
-      crCartToPurchase,
-      crPageviewToPurchase,
-      topPages: topPagesArray,
-      topReferrers: topReferrersArray,
-      utmCombos: utmArray,
-      // 🔴 NUOVO campo per dashboard
-      activeCarts
+    if (step) {
+      sendEvent({
+        type: "checkout_step",
+        step: step,
+        stepIndex: index,
+        cartValue: null,          // opzionale: puoi leggere da /cart.js se sei ancora nel dominio
+        currency: {{ shop.currency | json }}
+      });
+    }
+  }
+  detectCheckoutStep();
+
+  // ------------------ FORM / NEWSLETTER ------------------
+  window.addEventListener("DOMContentLoaded", function() {
+    // newsletter classico (puoi adattare i selettori ai tuoi form reali)
+    var forms = document.querySelectorAll("form");
+    forms.forEach(function(form) {
+      var formId = form.getAttribute("id") || form.getAttribute("name") || "form_generic";
+
+      form.addEventListener("submit", function() {
+        sendEvent({
+          type: "form_interaction",
+          formId: formId,
+          action: "submit"
+        });
+      });
+
+      form.addEventListener("focusin", function() {
+        sendEvent({
+          type: "form_interaction",
+          formId: formId,
+          action: "focus"
+        });
+      });
     });
-  } catch (err) {
-    console.error('Error in /api/summary', err);
-    res.status(500).json({ ok: false });
-  }
-});
-
-
-app.get("/admin/reset-db", async (req, res) => {
-  const token = req.query.token;
-
-  if (token !== RESET_TOKEN) {
-    return res.status(403).send("Accesso negato");
-  }
-
-  try {
-    await pool.query("TRUNCATE TABLE events RESTART IDENTITY");
-    res.send("Database eventi azzerato. Ora parti da zero!");
-  } catch (err) {
-    console.error("Errore nel reset del DB", err);
-    res.status(500).send("Errore nel cancellare gli eventi.");
-  }
-});
-
-
-// Endpoint per AZZERARE tutti i log (uso interno)
-app.get("/admin/reset-logs", (req, res) => {
-  const token = req.query.token;
-
-  if (token !== RESET_TOKEN) {
-    return res.status(403).send("Accesso negato");
-  }
-
-  clearAllLogs();
-  res.send("Log cancellati. La dashboard ripartirà da zero.");
-});
-
-app.get("/admin/reset-db", async (req, res) => {
-  const token = req.query.token;
-
-  if (token !== RESET_TOKEN) {
-    return res.status(403).send("Accesso negato");
-  }
-
-  try {
-    await pool.query("TRUNCATE TABLE events RESTART IDENTITY;");
-    res.send("Database eventi azzerato. Ora parti da zero!");
-  } catch (err) {
-    console.error("Errore nel reset del DB", err);
-    res.status(500).send("Errore nel cancellare gli eventi.");
-  }
-});
-
-app.get("/admin/backup-csv", async (req, res) => {
-  const token = req.query.token;
-
-  if (token !== RESET_TOKEN) {
-    return res.status(403).send("Accesso negato");
-  }
-
-  try {
-    const result = await pool.query(
-      `SELECT occurred_at, ip, user_agent, payload
-       FROM events
-       ORDER BY occurred_at ASC`
-    );
-
-    // Prepariamo un CSV semplice
-    let csv = "occurred_at,ip,user_agent,payload_json\n";
-    for (const row of result.rows) {
-      const occurred = row.occurred_at.toISOString();
-      const ip = row.ip ? row.ip.replace(/"/g, '""') : "";
-      const ua = row.user_agent ? row.user_agent.replace(/"/g, '""') : "";
-      const payload = row.payload
-        ? JSON.stringify(row.payload).replace(/"/g, '""')
-        : "";
-
-      csv += `"${occurred}","${ip}","${ua}","${payload}"\n`;
-    }
-
-    res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="events-backup-${new Date().toISOString().slice(0,10)}.csv"`
-    );
-    res.send(csv);
-  } catch (err) {
-    console.error("Errore nel backup CSV", err);
-    res.status(500).send("Errore nel generare il backup.");
-  }
-});
-
-
-/**
- * /dashboard – dashboard avanzata
- */
-/*app.get("/dashboard", (req, res) => {
-  res.send(`
-<!doctype html>
-<html lang="it">
-<head>
-  <meta charset="utf-8" />
-  <title>Analytics – La Perle du Caviar</title>
-  <style>
-    body { font-family: system-ui, -apple-system, sans-serif; margin: 0; background: #020617; color: #e5e7eb; }
-    .page { padding: 20px 24px 40px; max-width: 1200px; margin: 0 auto; }
-    h1 { margin: 0 0 6px; font-size: 24px; }
-    .subtitle { color: #9ca3af; margin-bottom: 20px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
-    .card { background: #030712; border: 1px solid #111827; border-radius: 10px; padding: 10px 14px; }
-    .card-title { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #9ca3af; margin-bottom: 4px; }
-    .card-value { font-size: 20px; font-weight: 600; }
-    .card-sub { font-size: 11px; color: #6b7280; margin-top: 2px; }
-
-    .funnel { display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }
-    .funnel-step { flex: 1; min-width: 160px; background: #030712; border-radius: 10px; padding: 10px 12px; border: 1px solid #111827; position: relative; }
-    .funnel-step h3 { margin: 0 0 4px; font-size: 13px; }
-    .funnel-count { font-size: 18px; font-weight: 600; }
-    .funnel-cr { font-size: 11px; color: #9ca3af; margin-top: 2px; }
-    .funnel-step::after { content: '→'; position: absolute; right: -10px; top: 50%; transform: translateY(-50%); color: #4b5563; font-size: 16px; }
-    .funnel-step:last-child::after { content: ''; }
-
-    .section-title { font-size: 15px; margin: 20px 0 8px; }
-    table { border-collapse: collapse; width: 100%; font-size: 12px; }
-    th, td { border: 1px solid #111827; padding: 6px 8px; vertical-align: top; }
-    th { background: #020617; position: sticky; top: 0; z-index: 1; }
-    tr:nth-child(even) { background: #020617; }
-    tr:nth-child(odd) { background: #030712; }
-
-    .tag { display: inline-block; padding: 2px 6px; border-radius: 999px; font-size: 11px; background: #374151; color: #e5e7eb; }
-    .tag-pageview { background: #2563eb; }
-    .tag-timeonpage { background: #16a34a; }
-    .tag-view_product { background: #ea580c; }
-    .tag-add_to_cart { background: #ca8a04; }
-    .tag-purchase { background: #a855f7; }
-
-    .filters { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
-    select, input { background: #020617; color: #e5e7eb; border-radius: 6px; border: 1px solid #111827; padding: 4px 6px; font-size: 12px; }
-    input::placeholder { color: #6b7280; }
-
-    .pill { display:inline-block; padding:2px 6px; border-radius:999px; background:#020617; color:#9ca3af; font-size:11px; border:1px solid #111827; margin-right:4px; }
-
-  </style>
-</head>
-<body>
-  <div class="page">
-    <h1>Analytics – La Perle du Caviar</h1>
-    <div class="subtitle">Ultimi eventi registrati (dati interni, nessun cookie di terze parti).</div>
-
-    <div id="overview" class="grid"></div>
-
-    <div class="section-title">Funnel principale</div>
-    <div class="funnel" id="funnel"></div>
-
-<div class="section-title">Pagine più viste</div>
-<div id="topPages"></div>
-
-<div class="section-title">Fonti di traffico</div>
-<div class="grid">
-  <div id="trafficSources"></div>
-  <div id="utmSources"></div>
-</div>
-
-<div class="section-title">Eventi recenti</div>
-
-    <div class="filters">
-      <label>Tipo:
-        <select id="filterType">
-          <option value="">Tutti</option>
-          <option value="pageview">pageview</option>
-          <option value="timeonpage">timeonpage</option>
-          <option value="view_product">view_product</option>
-          <option value="add_to_cart">add_to_cart</option>
-          <option value="purchase">purchase</option>
-        </select>
-      </label>
-      <input id="filterSearch" placeholder="Cerca in URL / titolo / dettagli..." />
-      <span class="pill" id="eventsCount"></span>
-    </div>
-
-    <table>
-      <thead>
-        <tr>
-          <th>Quando</th>
-          <th>Tipo</th>
-          <th>Pagina / URL</th>
-          <th>Dettagli</th>
-        </tr>
-      </thead>
-      <tbody id="rows"></tbody>
-    </table>
-  </div>
-
-<script>
-function formatTs(ts) {
-  if (!ts) return "";
-  try {
-    const d = new Date(ts);
-    return d.toLocaleString();
-  } catch(e) { return ts; }
-}
-
-function tag(type) {
-  const cls = "tag tag-" + type;
-  return '<span class="' + cls + '">' + type + '</span>';
-}
-
-function esc(str) {
-  if (!str && str !== 0) return "";
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-let ALL_EVENTS = [];
-
-function renderOverview(summary) {
-  const el = document.getElementById("overview");
-  const devices = summary.devices || {desktop:0, mobile:0, tablet:0, other:0};
-
-  const cards = [
-    { label: "Sessioni uniche", value: summary.uniqueSessions },
-    { label: "Visitatori unici", value: summary.uniqueVisitors },
-    { label: "Nuovi / di ritorno", value: (summary.newVisitors || 0) + " / " + (summary.returningVisitors || 0) },
-    { label: "Pageview", value: summary.pageviews },
-    { label: "Viste prodotto", value: summary.productViews },
-    { label: "Add to cart", value: summary.addToCart },
-    { label: "Acquisti", value: summary.purchases },
-    { label: "Device (M/D/T)", value: (devices.mobile||0) + " / " + (devices.desktop||0) + " / " + (devices.tablet||0) }
-  ];
-
-  el.innerHTML = cards.map(c => (
-    '<div class="card">' +
-      '<div class="card-title">' + esc(c.label) + '</div>' +
-      '<div class="card-value">' + esc(c.value) + '</div>' +
-    '</div>'
-  )).join("");
-}
-
-
-function renderFunnel(summary) {
-  const el = document.getElementById("funnel");
-  const steps = [
-    {
-      label: "Pageview",
-      count: summary.pageviews,
-      cr: summary.crPageviewToPurchase,
-      note: "→ purchase"
-    },
-    {
-      label: "View product",
-      count: summary.productViews,
-      cr: summary.crProductToCart,
-      note: "→ add_to_cart"
-    },
-    {
-      label: "Add to cart",
-      count: summary.addToCart,
-      cr: summary.crCartToPurchase,
-      note: "→ purchase"
-    },
-    {
-      label: "Purchase",
-      count: summary.purchases,
-      cr: null,
-      note: ""
-    }
-  ];
-  el.innerHTML = steps.map(s => (
-    '<div class="funnel-step">' +
-      '<h3>' + esc(s.label) + '</h3>' +
-      '<div class="funnel-count">' + esc(Math.round(s.count)) + '</div>' +
-      (s.cr != null ? '<div class="funnel-cr">CR: ' + esc(s.cr.toFixed(1)) + '% ' + esc(s.note) + '</div>' : '') +
-    '</div>'
-  )).join("");
-}
-
-function renderTopPages(summary) {
-  const el = document.getElementById("topPages");
-  if (!summary.topPages || !summary.topPages.length) {
-    el.innerHTML = '<div class="card"><div class="card-title">Top pages</div><div class="card-sub">Nessun dato sufficiente</div></div>';
-    return;
-  }
-  el.innerHTML =
-    '<div class="card">' +
-      '<div class="card-title">Top pages (ultimi eventi)</div>' +
-      summary.topPages.map(p => (
-        '<div class="card-sub">' + esc(p.path) + ' – ' + esc(p.count) + ' eventi</div>'
-      )).join("") +
-    '</div>';
-}
-
-function renderTrafficSources(summary) {
-  const el = document.getElementById("trafficSources");
-  if (!el) return;
-
-  let html = '<div class="card"><div class="card-title">Fonti di traffico (referrer)</div>';
-
-  if (!summary.topReferrers || !summary.topReferrers.length) {
-    html += '<div class="card-sub">Nessun dato referrer disponibile.</div></div>';
-    el.innerHTML = html;
-    return;
-  }
-
-  summary.topReferrers.forEach(r => {
-    html += '<div class="card-sub">' + esc(r.source) + ' – ' + esc(r.count) + ' pageview</div>';
   });
 
-  html += '</div>';
-  el.innerHTML = html;
-}
-
-function renderUtm(summary) {
-  const el = document.getElementById("utmSources");
-  if (!el) return;
-
-  let html = '<div class="card"><div class="card-title">UTM (ultime campagne)</div>';
-
-  if (!summary.utmCombos || !summary.utmCombos.length) {
-    html += '<div class="card-sub">Nessuna UTM rilevata.</div></div>';
-    el.innerHTML = html;
-    return;
-  }
-
-  summary.utmCombos.forEach(u => {
-    html += '<div class="card-sub">' +
-      'source: <strong>' + esc(u.source) + '</strong> · ' +
-      'medium: <strong>' + esc(u.medium) + '</strong> · ' +
-      'campaign: <strong>' + esc(u.campaign) + '</strong> ' +
-      ' (' + esc(u.count) + ' pageview)' +
-      '</div>';
+  // ------------------ JS ERROR & PROMISE ERROR ------------------
+  window.addEventListener("error", function(e) {
+    try {
+      sendEvent({
+        type: "js_error",
+        message: e.message || "",
+        source: (e.filename || "").toString(),
+        line: e.lineno || null,
+        col: e.colno || null
+      });
+    } catch(_){}
   });
 
-  html += '</div>';
-  el.innerHTML = html;
-}
+  window.addEventListener("unhandledrejection", function(e) {
+    try {
+      sendEvent({
+        type: "js_error",
+        message: (e.reason && e.reason.message) ? e.reason.message : "unhandledrejection",
+        source: "promise",
+        line: null,
+        col: null
+      });
+    } catch(_){}
+  });
 
-function renderTable() {
-  const tbody = document.getElementById("rows");
-  const typeFilter = document.getElementById("filterType").value;
-  const search = document.getElementById("filterSearch").value.toLowerCase();
-  let filtered = ALL_EVENTS.slice();
+  // ------------------ PERFORMANCE METRICS (LCP/FCP/TTFB best-effort) ------------------
+  (function() {
+    function sendPerf() {
+      try {
+        var perf = window.performance;
+        if (!perf) return;
 
-  if (typeFilter) {
-    filtered = filtered.filter(ev => (ev.payload || {}).type === typeFilter);
-  }
-  if (search) {
-    filtered = filtered.filter(ev => {
-      const p = ev.payload || {};
-      const url = (p.url || p.path || "");
-      const details = JSON.stringify(p);
-      return url.toLowerCase().includes(search) ||
-             details.toLowerCase().includes(search);
-    });
-  }
+        var ttfb = 0;
+        if (perf.getEntriesByType) {
+          var navEntries = perf.getEntriesByType("navigation");
+          if (navEntries && navEntries[0]) {
+            ttfb = navEntries[0].responseStart;
+          }
+        }
 
-  document.getElementById("eventsCount").textContent =
-    filtered.length + " eventi mostrati";
+        var fcp = 0;
+        var lcp = 0;
+        if ("getEntriesByType" in perf) {
+          var paints = perf.getEntriesByType("paint") || [];
+          paints.forEach(function(p) {
+            if (p.name === "first-contentful-paint") {
+              fcp = p.startTime;
+            }
+          });
+        }
 
-  tbody.innerHTML = filtered.map(ev => {
-    const p = ev.payload || {};
-    const type = p.type || "";
-    const url = p.url || p.path || "";
-    let details = "";
+        if ("PerformanceObserver" in window) {
+          try {
+            var po = new PerformanceObserver(function(list) {
+              var entries = list.getEntries();
+              entries.forEach(function(entry) {
+                if (entry.entryType === "largest-contentful-paint") {
+                  lcp = entry.startTime;
+                }
+              });
+            });
+            po.observe({ type: "largest-contentful-paint", buffered: true });
+          } catch(e) {}
+        }
 
-    if (type === "pageview") {
-      details =
-        "Referrer: " + esc(p.referrer || "-") +
-        "<br>Title: " + esc(p.title || "-") +
-        "<br>UTM: " + esc(p.utm_source || "-") + " / " +
-        esc(p.utm_medium || "-") + " / " +
-        esc(p.utm_campaign || "-");
-    } else if (type === "timeonpage") {
-      details = "Durata: " + Math.round((p.millis || 0) / 1000) + "s";
-    } else if (type === "view_product") {
-      details =
-        "Prodotto: " + esc(p.productTitle || "-") +
-        "<br>ID: " + esc(p.productId || "-") +
-        "<br>Prezzo: " + esc(p.productPrice || "-") +
-        "<br>Variant: " + esc(p.variantTitle || "-");
-    } else if (type === "add_to_cart") {
-      details =
-        "Variant ID: " + esc(p.variantId || "-") +
-        "<br>Qty: " + esc(p.quantity || "-") +
-        (p.productTitle ? "<br>Prodotto: " + esc(p.productTitle) : "");
-    } else if (type === "purchase") {
-      details =
-        "Order: " + esc(p.orderNumber || p.orderId || "-") +
-        "<br>Totale: " + esc(p.total || p.orderPrice || "-") +
-        " " + esc(p.currency || "") +
-        "<br>Items: " + esc(p.itemsCount || (p.items ? p.items.length : "-"));
+        setTimeout(function() {
+          sendEvent({
+            type: "perf_metric",
+            lcp: lcp || null,
+            fcp: fcp || null,
+            ttfb: ttfb || null
+          });
+        }, 2000);
+      } catch(e) {}
+    }
+
+    if (document.readyState === "complete") {
+      sendPerf();
     } else {
-      details = "<code>" + esc(JSON.stringify(p)) + "</code>";
+      window.addEventListener("load", function() {
+        sendPerf();
+      });
     }
+  })();
 
-    return (
-      "<tr>" +
-        "<td>" + esc(formatTs(ev.receivedAt || p.ts)) + "</td>" +
-        "<td>" + tag(type) + "</td>" +
-        "<td>" + esc(url || "-") + "</td>" +
-        "<td>" + details + "</td>" +
-      "</tr>"
-    );
-  }).join("");
-}
-
-document.getElementById("filterType").addEventListener("change", renderTable);
-document.getElementById("filterSearch").addEventListener("input", renderTable);
-
-// Carica dati
-Promise.all([
-  fetch("/api/summary").then(r => r.json()),
-  fetch("/api/events?limit=10000").then(r => r.json())
-]).then(([summary, events]) => {
-  ALL_EVENTS = events || [];
-  renderOverview(summary);
-  renderFunnel(summary);
-  renderTopPages(summary);
-  renderTrafficSources(summary);
-  renderUtm(summary);
-  renderTable();
-}).catch(err => {
-  console.error("Errore nel caricamento dashboard", err);
-});
-
+})();
 </script>
-</body>
-</html>
-  `);
-});
-*/
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log("Tracker attivo sulla porta " + PORT);
-});
