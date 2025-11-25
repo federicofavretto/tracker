@@ -117,16 +117,45 @@ app.get("/api/events", async (req, res) => {
       LIMIT $1
     `;
 
-    const result = await pool.query(query, params);
+const result = await pool.query(query, params);
 
-    const events = result.rows.map((row) => ({
-      receivedAt: row.occurred_at,
-      ip: row.ip,
-      userAgent: row.user_agent,
-      payload: row.payload,
-    }));
+const rawEvents = result.rows.map(row => ({
+  receivedAt: row.occurred_at,
+  ip: row.ip,
+  userAgent: row.user_agent,
+  payload: row.payload
+}));
 
-    res.json(events);
+// Deduplica dei view_product (stesso visitor/session/prodotto nello stesso secondo)
+const seenViewKeys = new Set();
+const events = [];
+
+for (const ev of rawEvents) {
+  const p = ev.payload || {};
+  if (p.type === "view_product") {
+    const ts = new Date(ev.receivedAt);
+    const secondBucket = isNaN(ts.getTime())
+      ? ""
+      : ts.toISOString().slice(0, 19); // yyyy-mm-ddTHH:MM:SS
+
+    const key = [
+      p.sessionId || "",
+      p.visitorId || "",
+      p.productId || "",
+      p.path || p.url || "",
+      secondBucket
+    ].join("|");
+
+    if (seenViewKeys.has(key)) {
+      continue; // salta i duplicati
+    }
+    seenViewKeys.add(key);
+  }
+  events.push(ev);
+}
+
+res.json(events);
+
   } catch (err) {
     console.error("Errore in /api/events:", err);
     res.status(500).json({ ok: false });
@@ -173,6 +202,8 @@ app.get("/api/summary", async (req, res) => {
       paymentErrors: 0,
       perfSamples: [],
     };
+
+    const productViewSeen = new Set();
 
     events.forEach((ev) => {
       const p = ev.payload || {};
@@ -253,13 +284,20 @@ app.get("/api/summary", async (req, res) => {
       }
 
       // prodotti: categorie e grammi
-      if (type === "view_product") {
-        const cat = p.productCategory || "Altro";
-        const grams = p.grams || 0;
-        stats.productCategories[cat] = (stats.productCategories[cat] || 0) + 1;
-        const gramsKey = String(grams);
-        stats.gramsViews[gramsKey] = (stats.gramsViews[gramsKey] || 0) + 1;
+      else if (type === "view_product") {
+        const key = [
+          p.sessionId || "",
+          p.visitorId || "",
+          p.productId || "",
+          p.path || p.url || ""
+        ].join("|");
+
+        if (!productViewSeen.has(key)) {
+          productViewSeen.add(key);
+          stats.productViews++;
+        }
       }
+
 
       // media interaction
       if (type === "media_interaction") {
