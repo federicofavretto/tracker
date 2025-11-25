@@ -1,382 +1,351 @@
-<script>
-(function() {
-  const TRACKER_ENDPOINT = "https://tracker-mhw8.onrender.com/collect";
+const express = require("express");
+const cors = require("cors");
+const fs = require("fs");
+const path = require("path");
+const pool = require("./db"); // pool Postgres
 
-  // ------------------ IDENTITÀ VISITATORE / SESSIONE ------------------
-  function getOrCreateVisitorId() {
-    try {
-      let id = localStorage.getItem("lpdc_visitor_id");
-      if (!id) {
-        id = "v_" + Math.random().toString(36).substr(2, 9) + Date.now();
-        localStorage.setItem("lpdc_visitor_id", id);
-        localStorage.setItem("lpdc_first_visit_at", new Date().toISOString());
-      }
-      return id;
-    } catch(e) {
-      return null;
-    }
+const app = express();
+const RESET_TOKEN = "LAPERLE_RESET_2024";
+
+// ------------------ MIDDLEWARE ------------------
+app.use(
+  cors({
+    origin: true, // accetta richieste da qualunque origine (Shopify + dashboard)
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type"],
+  })
+);
+
+app.options("*", cors());
+app.use(express.json());
+
+// dashboard statica
+app.use("/dashboard", express.static(path.join(__dirname, "dashboard")));
+
+// ------------------ UTILS ------------------
+function anonymizeIp(ip) {
+  if (!ip) return "";
+  const parts = ip.split(".");
+  if (parts.length === 4) {
+    parts[3] = "0";
+    return parts.join(".");
   }
+  return ip;
+}
 
-  function getOrCreateSessionId() {
-    try {
-      let id = sessionStorage.getItem("lpdc_session_id");
-      if (!id) {
-        id = "s_" + Math.random().toString(36).substr(2, 9) + Date.now();
-        sessionStorage.setItem("lpdc_session_id", id);
-      }
-      return id;
-    } catch(e) {
-      return null;
-    }
-  }
+// ------------------ /collect: riceve gli eventi dal tema Shopify ------------------
+app.post("/collect", async (req, res) => {
+  const clientIp =
+    req.headers["x-forwarded-for"]?.split(",")[0] ||
+    req.socket.remoteAddress ||
+    "";
 
-  const visitorId = getOrCreateVisitorId();
-  const sessionId = getOrCreateSessionId();
-
-  function getDaysSinceFirstVisit() {
-    try {
-      const first = localStorage.getItem("lpdc_first_visit_at");
-      if (!first) return null;
-      const t0 = new Date(first).getTime();
-      const t1 = Date.now();
-      return Math.round((t1 - t0) / (1000 * 60 * 60 * 24));
-    } catch(e) {
-      return null;
-    }
-  }
-
-  function isNewVisitorThisSession() {
-    try {
-      const flag = sessionStorage.getItem("lpdc_is_new_visitor");
-      if (flag === "0" || flag === "1") return flag === "1";
-
-      const first = localStorage.getItem("lpdc_first_visit_at");
-      const isNew = !first;
-      sessionStorage.setItem("lpdc_is_new_visitor", isNew ? "1" : "0");
-      if (isNew) {
-        localStorage.setItem("lpdc_first_visit_at", new Date().toISOString());
-      }
-      return isNew;
-    } catch(e) {
-      return false;
-    }
-  }
-
-  // ------------------ UTILS ------------------
-  function getDeviceType() {
-    const ua = navigator.userAgent || "";
-    if (/Mobile|Android|iP(hone|od)/i.test(ua)) return "mobile";
-    if (/iPad|Tablet/i.test(ua)) return "tablet";
-    return "desktop";
-  }
-
-  function parseUtm() {
-    const params = new URLSearchParams(window.location.search || "");
-    return {
-      utm_source: params.get("utm_source") || null,
-      utm_medium: params.get("utm_medium") || null,
-      utm_campaign: params.get("utm_campaign") || null
-    };
-  }
-
-  function sendEvent(payload) {
-    try {
-      const base = {
-        sessionId,
-        visitorId,
-        isNewVisitor: isNewVisitorThisSession(),
-        daysSinceFirstVisit: getDaysSinceFirstVisit(),
-        url: window.location.href,
-        path: window.location.pathname,
-        referrer: document.referrer || "",
-        deviceType: getDeviceType()
-      };
-      const utm = parseUtm();
-
-      fetch(TRACKER_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        keepalive: true,
-        body: JSON.stringify(Object.assign({}, base, utm, payload))
-      }).catch(function(){});
-    } catch(e) {}
-  }
-
-  // ------------------ PAGEVIEW + TIMEONPAGE ------------------
-  window.addEventListener("DOMContentLoaded", function() {
-    sendEvent({
-      type: "pageview",
-      title: document.title || ""
-    });
-  });
-
-  (function(){
-    let start = Date.now();
-    function flushTimeOnPage() {
-      const millis = Date.now() - start;
-      if (millis > 500) {
-        sendEvent({
-          type: "timeonpage",
-          millis: millis
-        });
-      }
-    }
-    window.addEventListener("beforeunload", flushTimeOnPage);
-    document.addEventListener("visibilitychange", function() {
-      if (document.visibilityState === "hidden") flushTimeOnPage();
-    });
-  })();
-
-  // ------------------ VIEW_PRODUCT ENRICHED (solo pagina prodotto) ------------------
-  {% if template contains 'product' and product %}
-  window.addEventListener("DOMContentLoaded", function() {
-    var productData = {
-      id: {{ product.id | json }},
-      title: {{ product.title | json }},
-      price: {{ product.price | divided_by: 100.0 | json }},
-      type: {{ product.type | json }},
-      grams: {{ product.variants.first.weight | default: 0 | json }},
-      inStock: {{ product.available | json }},
-      currency: {{ shop.currency | json }}
-    };
-
-    sendEvent({
-      type: "view_product",
-      productId: productData.id,
-      productTitle: productData.title,
-      productCategory: productData.type,
-      grams: productData.grams,
-      productPrice: productData.price,
-      currency: productData.currency,
-      inStock: productData.inStock
-    });
-
-    // MEDIA INTERACTION (immagini/video prodotto)
-    try {
-      var images = document.querySelectorAll("img, [data-product-media]");
-      images.forEach(function(img, idx) {
-        img.addEventListener("click", function() {
-          sendEvent({
-            type: "media_interaction",
-            mediaType: "image",
-            action: "open",
-            productId: productData.id,
-            mediaPosition: idx + 1
-          });
-        });
-      });
-      var vids = document.querySelectorAll("video");
-      vids.forEach(function(v, idx) {
-        v.addEventListener("play", function() {
-          sendEvent({
-            type: "media_interaction",
-            mediaType: "video",
-            action: "play",
-            productId: productData.id,
-            mediaPosition: idx + 1
-          });
-        });
-        v.addEventListener("ended", function() {
-          sendEvent({
-            type: "media_interaction",
-            mediaType: "video",
-            action: "end",
-            productId: productData.id,
-            mediaPosition: idx + 1
-          });
-        });
-      });
-    } catch(e) {}
-  });
-  {% endif %}
-
-  // ------------------ CART_STATE + INTERCETTARE /cart ------------------
-  async function sendCartState() {
-    try {
-      const res = await fetch("/cart.js", { credentials: "same-origin" });
-      if (!res.ok) return;
-      const cart = await res.json();
-      var items = (cart.items || []).map(function(item) {
-        return {
-          productId: item.product_id,
-          variantId: item.variant_id,
-          quantity: item.quantity,
-          productTitle: item.product_title,
-          linePrice: item.line_price / 100.0
-        };
-      });
-
-      sendEvent({
-        type: "cart_state",
-        items: items,
-        totalPrice: cart.total_price ? cart.total_price / 100.0 : 0,
-        currency: {{ shop.currency | json }}
-      });
-    } catch(e) {}
-  }
-
-// wrap fetch per intercettare SOLO le chiamate che modificano il carrello
-(function() {
-  var origFetch = window.fetch;
-  window.fetch = function(input, init) {
-    return origFetch(input, init).then(function(resp) {
-      try {
-        var url = typeof input === "string" ? input : (input.url || "");
-        if (
-          url.indexOf("/cart/add")   !== -1 ||
-          url.indexOf("/cart/change")!== -1 ||
-          url.indexOf("/cart/update")!== -1 ||
-          url.indexOf("/cart/clear") !== -1 ||
-          url.endsWith("/cart.js")
-        ) {
-          setTimeout(sendCartState, 500); // 0.5s dopo la modifica del carrello
-        }
-      } catch(e) {}
-      return resp;
-    });
+  const entry = {
+    occurred_at: new Date().toISOString(),
+    ip: anonymizeIp(clientIp),
+    userAgent: req.headers["user-agent"] || "",
+    payload: req.body || {},
   };
-})();
 
-// opzionale: puoi anche commentarlo per alleggerire ulteriormente
-// setInterval(sendCartState, 60000); // ogni 60 secondi
+  console.log("Evento /collect:", entry.payload?.type, entry.payload?.url || "");
 
-
-  // ------------------ CHECKOUT_STEP (solo lato URL, best effort) ------------------
-  function detectCheckoutStep() {
-    var path = window.location.pathname || "";
-    var step = null;
-    var index = null;
-
-    if (path.indexOf("/cart") !== -1) {
-      step = "cart"; index = 1;
-    } else if (path.indexOf("/checkout") !== -1) {
-      // senza accesso a step Shopify, usiamo un best-effort
-      step = "checkout"; index = 2;
-    } else if (path.indexOf("/thank_you") !== -1 || path.indexOf("/thank-you") !== -1) {
-      step = "thankyou"; index = 5;
-    }
-
-    if (step) {
-      sendEvent({
-        type: "checkout_step",
-        step: step,
-        stepIndex: index,
-        cartValue: null,          // opzionale: puoi leggere da /cart.js se sei ancora nel dominio
-        currency: {{ shop.currency | json }}
-      });
-    }
+  try {
+    await pool.query(
+      `INSERT INTO events (occurred_at, ip, user_agent, payload)
+       VALUES ($1, $2, $3, $4)`,
+      [entry.occurred_at, entry.ip, entry.userAgent, entry.payload]
+    );
+  } catch (err) {
+    console.error("Errore inserendo evento in Postgres:", err);
+    // non blocchiamo il browser
   }
-  detectCheckoutStep();
 
-  // ------------------ FORM / NEWSLETTER ------------------
-  window.addEventListener("DOMContentLoaded", function() {
-    // newsletter classico (puoi adattare i selettori ai tuoi form reali)
-    var forms = document.querySelectorAll("form");
-    forms.forEach(function(form) {
-      var formId = form.getAttribute("id") || form.getAttribute("name") || "form_generic";
+  res.status(204).end();
+});
 
-      form.addEventListener("submit", function() {
-        sendEvent({
-          type: "form_interaction",
-          formId: formId,
-          action: "submit"
-        });
-      });
+// ------------------ helper: leggi ultimi N eventi ------------------
+async function readLastEvents(limit = null) {
+  let query = `
+    SELECT occurred_at, ip, user_agent, payload
+    FROM events
+    ORDER BY occurred_at DESC
+  `;
+  const params = [];
 
-      form.addEventListener("focusin", function() {
-        sendEvent({
-          type: "form_interaction",
-          formId: formId,
-          action: "focus"
-        });
-      });
-    });
-  });
+  if (limit) {
+    query += " LIMIT $1";
+    params.push(limit);
+  }
 
-  // ------------------ JS ERROR & PROMISE ERROR ------------------
-  window.addEventListener("error", function(e) {
-    try {
-      sendEvent({
-        type: "js_error",
-        message: e.message || "",
-        source: (e.filename || "").toString(),
-        line: e.lineno || null,
-        col: e.colno || null
-      });
-    } catch(_){}
-  });
+  const result = await pool.query(query, params);
 
-  window.addEventListener("unhandledrejection", function(e) {
-    try {
-      sendEvent({
-        type: "js_error",
-        message: (e.reason && e.reason.message) ? e.reason.message : "unhandledrejection",
-        source: "promise",
-        line: null,
-        col: null
-      });
-    } catch(_){}
-  });
+  return result.rows.map((row) => ({
+    receivedAt: row.occurred_at,
+    ip: row.ip,
+    userAgent: row.user_agent,
+    payload: row.payload,
+  }));
+}
 
-  // ------------------ PERFORMANCE METRICS (LCP/FCP/TTFB best-effort) ------------------
-  (function() {
-    function sendPerf() {
-      try {
-        var perf = window.performance;
-        if (!perf) return;
+// ------------------ /api/events: per la tabella in basso ------------------
+app.get("/api/events", async (req, res) => {
+  const limit = Number(req.query.limit) || 300;
+  const range = req.query.range || null; // opzionale, tipo '7d', '30d'
 
-        var ttfb = 0;
-        if (perf.getEntriesByType) {
-          var navEntries = perf.getEntriesByType("navigation");
-          if (navEntries && navEntries[0]) {
-            ttfb = navEntries[0].responseStart;
+  const ranges = {
+    "7d": "NOW() - INTERVAL '7 days'",
+    "30d": "NOW() - INTERVAL '30 days'",
+    "90d": "NOW() - INTERVAL '90 days'",
+    "180d": "NOW() - INTERVAL '180 days'",
+    "365d": "NOW() - INTERVAL '365 days'",
+  };
+
+  try {
+    let whereClause = "";
+    const params = [limit];
+
+    if (range && ranges[range]) {
+      whereClause = `WHERE occurred_at >= ${ranges[range]}`;
+    }
+
+    const query = `
+      SELECT occurred_at, ip, user_agent, payload
+      FROM events
+      ${whereClause}
+      ORDER BY occurred_at DESC
+      LIMIT $1
+    `;
+
+    const result = await pool.query(query, params);
+
+    const events = result.rows.map((row) => ({
+      receivedAt: row.occurred_at,
+      ip: row.ip,
+      userAgent: row.user_agent,
+      payload: row.payload,
+    }));
+
+    res.json(events);
+  } catch (err) {
+    console.error("Errore in /api/events:", err);
+    res.status(500).json({ ok: false });
+  }
+});
+
+// ------------------ /api/summary: numeri per la dashboard ------------------
+app.get("/api/summary", async (req, res) => {
+  try {
+    // se la tabella cresce molto, puoi mettere un limite: readLastEvents(50000)
+    const events = await readLastEvents();
+
+    const stats = {
+      totalEvents: events.length,
+      pageviews: 0,
+      timeonpageEvents: 0,
+      productViews: 0,
+      addToCart: 0,
+      purchases: 0,
+
+      uniqueSessions: new Set(),
+      uniqueVisitors: new Set(),
+      newVisitors: 0,
+      returningVisitors: 0,
+
+      devices: { desktop: 0, mobile: 0, tablet: 0, other: 0 },
+
+      topPages: {},
+      referrers: {},
+      utmCombos: {},
+
+      latestCartByVisitor: new Map(), // per carrelli attivi
+    };
+
+    events.forEach((ev) => {
+      const p = ev.payload || {};
+      const type = p.type;
+      const sessionId = p.sessionId || null;
+      const visitorId = p.visitorId || null;
+      const isNewVisitor = p.isNewVisitor === true;
+      const path = p.path || p.url || "";
+      const ref = p.referrer || "";
+      const utmSource = p.utm_source || "";
+      const utmMedium = p.utm_medium || "";
+      const utmCampaign = p.utm_campaign || "";
+      const deviceType = p.deviceType || "other";
+
+      if (sessionId) stats.uniqueSessions.add(sessionId);
+      if (visitorId) stats.uniqueVisitors.add(visitorId);
+
+      if (type === "pageview") {
+        if (isNewVisitor) stats.newVisitors++;
+        else stats.returningVisitors++;
+      }
+
+      if (
+        deviceType === "desktop" ||
+        deviceType === "mobile" ||
+        deviceType === "tablet"
+      ) {
+        stats.devices[deviceType]++;
+      } else {
+        stats.devices.other++;
+      }
+
+      if (path) {
+        stats.topPages[path] = (stats.topPages[path] || 0) + 1;
+      }
+
+      if (type === "pageview") {
+        let key = "Direct / none";
+        if (ref && ref !== "") {
+          try {
+            const url = new URL(ref);
+            key = url.hostname;
+          } catch (e) {
+            key = ref;
           }
         }
+        stats.referrers[key] = (stats.referrers[key] || 0) + 1;
+      }
 
-        var fcp = 0;
-        var lcp = 0;
-        if ("getEntriesByType" in perf) {
-          var paints = perf.getEntriesByType("paint") || [];
-          paints.forEach(function(p) {
-            if (p.name === "first-contentful-paint") {
-              fcp = p.startTime;
-            }
-          });
-        }
+      if (type === "pageview") {
+        const s = utmSource || "(none)";
+        const m = utmMedium || "(none)";
+        const c = utmCampaign || "(none)";
+        const comboKey = `${s}|${m}|${c}`;
+        stats.utmCombos[comboKey] = (stats.utmCombos[comboKey] || 0) + 1;
+      }
 
-        if ("PerformanceObserver" in window) {
-          try {
-            var po = new PerformanceObserver(function(list) {
-              var entries = list.getEntries();
-              entries.forEach(function(entry) {
-                if (entry.entryType === "largest-contentful-paint") {
-                  lcp = entry.startTime;
-                }
-              });
-            });
-            po.observe({ type: "largest-contentful-paint", buffered: true });
-          } catch(e) {}
-        }
+      // conteggi base
+      if (type === "pageview") stats.pageviews++;
+      else if (type === "timeonpage") stats.timeonpageEvents++;
+      else if (type === "view_product") stats.productViews++;
+      else if (type === "add_to_cart") stats.addToCart++;
+      else if (type === "purchase") stats.purchases++;
 
-        setTimeout(function() {
-          sendEvent({
-            type: "perf_metric",
-            lcp: lcp || null,
-            fcp: fcp || null,
-            ttfb: ttfb || null
-          });
-        }, 2000);
-      } catch(e) {}
-    }
+      // carrelli attivi
+      if (type === "cart_state" && visitorId) {
+        stats.latestCartByVisitor.set(visitorId, p.items || []);
+      }
+    });
 
-    if (document.readyState === "complete") {
-      sendPerf();
-    } else {
-      window.addEventListener("load", function() {
-        sendPerf();
+    const sessionsCount = stats.uniqueSessions.size || 1;
+
+    const crProductToCart =
+      stats.productViews > 0
+        ? (stats.addToCart / stats.productViews) * 100
+        : 0;
+    const crCartToPurchase =
+      stats.addToCart > 0
+        ? (stats.purchases / stats.addToCart) * 100
+        : 0;
+    const crPageviewToPurchase =
+      stats.pageviews > 0
+        ? (stats.purchases / stats.pageviews) * 100
+        : 0;
+
+    const topPagesArray = Object.entries(stats.topPages)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([path, count]) => ({ path, count }));
+
+    const topReferrersArray = Object.entries(stats.referrers)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([source, count]) => ({ source, count }));
+
+    const utmArray = Object.entries(stats.utmCombos)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([combo, count]) => {
+        const [s, m, c] = combo.split("|");
+        return { source: s, medium: m, campaign: c, count };
       });
-    }
-  })();
 
-})();
-</script>
+    // carrelli attivi: quanti visitor hanno items.length > 0
+    let activeCarts = 0;
+    for (const [, items] of stats.latestCartByVisitor.entries()) {
+      if (Array.isArray(items) && items.length > 0) activeCarts++;
+    }
+
+    res.json({
+      totalEvents: stats.totalEvents,
+      pageviews: stats.pageviews,
+      timeonpageEvents: stats.timeonpageEvents,
+      productViews: stats.productViews,
+      addToCart: stats.addToCart,
+      purchases: stats.purchases,
+      uniqueSessions: sessionsCount,
+      uniqueVisitors: stats.uniqueVisitors.size,
+      newVisitors: stats.newVisitors,
+      returningVisitors: stats.returningVisitors,
+      devices: stats.devices,
+      crProductToCart,
+      crCartToPurchase,
+      crPageviewToPurchase,
+      topPages: topPagesArray,
+      topReferrers: topReferrersArray,
+      utmCombos: utmArray,
+      activeCarts,
+    });
+  } catch (err) {
+    console.error("Errore in /api/summary:", err);
+    res.status(500).json({ ok: false });
+  }
+});
+
+// ------------------ ENDPOINT ADMIN (facoltativi) ------------------
+app.get("/admin/reset-db", async (req, res) => {
+  const token = req.query.token;
+  if (token !== RESET_TOKEN) {
+    return res.status(403).send("Accesso negato");
+  }
+  try {
+    await pool.query("TRUNCATE TABLE events RESTART IDENTITY;");
+    res.send("Database eventi azzerato.");
+  } catch (err) {
+    console.error("Errore reset DB:", err);
+    res.status(500).send("Errore nel cancellare gli eventi.");
+  }
+});
+
+app.get("/admin/backup-csv", async (req, res) => {
+  const token = req.query.token;
+  if (token !== RESET_TOKEN) {
+    return res.status(403).send("Accesso negato");
+  }
+  try {
+    const result = await pool.query(
+      `SELECT occurred_at, ip, user_agent, payload
+       FROM events
+       ORDER BY occurred_at ASC`
+    );
+    let csv = "occurred_at,ip,user_agent,payload_json\n";
+    for (const row of result.rows) {
+      const occurred = row.occurred_at.toISOString();
+      const ip = row.ip ? row.ip.replace(/"/g, '""') : "";
+      const ua = row.user_agent ? row.user_agent.replace(/"/g, '""') : "";
+      const payload = row.payload
+        ? JSON.stringify(row.payload).replace(/"/g, '""')
+        : "";
+      csv += `"${occurred}","${ip}","${ua}","${payload}"\n`;
+    }
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="events-backup-${new Date()
+        .toISOString()
+        .slice(0, 10)}.csv"`
+    );
+    res.send(csv);
+  } catch (err) {
+    console.error("Errore backup CSV:", err);
+    res.status(500).send("Errore nel generare il backup.");
+  }
+});
+
+// ------------------ AVVIO SERVER ------------------
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log("Tracker attivo sulla porta " + PORT);
+});
