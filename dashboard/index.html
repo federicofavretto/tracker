@@ -244,426 +244,373 @@
   </div>
 
 <script>
-(function() {
-  const TRACKER_ENDPOINT = "https://tracker-mhw8.onrender.com/collect";
+(function () {
+  const overviewEl      = document.getElementById("overview");
+  const funnelEl        = document.getElementById("funnel");
+  const checkoutEl      = document.getElementById("checkoutSteps");
+  const topPagesEl      = document.getElementById("topPages");
+  const trafficEl       = document.getElementById("trafficSources");
+  const utmEl           = document.getElementById("utmSources");
+  const productCatEl    = document.getElementById("productCategories");
+  const gramsEl         = document.getElementById("gramsViews");
+  const mediaEl         = document.getElementById("mediaInteractions");
+  const geoEl           = document.getElementById("geoStats");
+  const techEl          = document.getElementById("techHealth");
+  const tbodyEl         = document.getElementById("eventsTableBody");
+  const filterTimeEl    = document.getElementById("filterTime");
+  const filterTypeEl    = document.getElementById("filterType");
+  const filterTextEl    = document.getElementById("filterText");
+  const rowsInfoEl      = document.getElementById("rowsInfo");
 
-// ------------------ CONSENSO SEMPRE TRUE (modalità test) ------------------
-let hasConsent = true;
-// Forziamo sempre il consenso durante la fase di test
-console.log("Tracker: modalità TEST attiva → consenso forzato su TRUE");
+  let ALL_EVENTS = [];
 
+  function fmtNumber(n) {
+    if (!n) return "0";
+    return Number(n).toLocaleString("it-IT");
+  }
 
-  // ------------------ IDENTITÀ VISITATORE / SESSIONE ------------------
-  function getOrCreateVisitorId() {
-    try {
-      let id = localStorage.getItem("lpdc_visitor_id");
-      if (!id) {
-        id = "v_" + Math.random().toString(36).substr(2, 9) + Date.now();
-        localStorage.setItem("lpdc_visitor_id", id);
-        localStorage.setItem("lpdc_first_visit_at", new Date().toISOString());
-      }
-      return id;
-    } catch(e) {
-      return null;
+  function fmtPercent(x) {
+    if (!x) return "0%";
+    return x.toFixed(1).replace(".", ",") + "%";
+  }
+
+  // ------------------ SUMMARY ------------------
+  async function loadSummary() {
+    const res = await fetch("/api/summary");
+    if (!res.ok) {
+      console.error("Errore /api/summary", res.status);
+      return;
     }
+    const s = await res.json();
+    renderOverview(s);
+    renderFunnel(s);
+    renderCheckout(s);
+    renderTopPages(s);
+    renderTraffic(s);
+    renderProductsAndMedia(s);
+    renderGeoAndTech(s);
   }
 
-  function getOrCreateSessionId() {
-    try {
-      let id = sessionStorage.getItem("lpdc_session_id");
-      if (!id) {
-        id = "s_" + Math.random().toString(36).substr(2, 9) + Date.now();
-        sessionStorage.setItem("lpdc_session_id", id);
-      }
-      return id;
-    } catch(e) {
-      return null;
+  function renderOverview(s) {
+    overviewEl.innerHTML = `
+      <div class="card">
+        <div class="card-title">Pageview</div>
+        <div class="card-value">${fmtNumber(s.pageviews)}</div>
+        <div class="card-sub">CR: ${fmtPercent(s.crPageviewToPurchase || 0)} → purchase</div>
+      </div>
+      <div class="card">
+        <div class="card-title">View product</div>
+        <div class="card-value">${fmtNumber(s.productViews)}</div>
+        <div class="card-sub">CR: ${fmtPercent(s.crProductToCart || 0)} → add_to_cart</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Add to cart</div>
+        <div class="card-value">${fmtNumber(s.addToCart)}</div>
+        <div class="card-sub">CR: ${fmtPercent(s.crCartToPurchase || 0)} → purchase</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Purchase</div>
+        <div class="card-value">${fmtNumber(s.purchases)}</div>
+        <div class="card-sub">Sessioni uniche: ${fmtNumber(s.uniqueSessions || 0)}</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Carrelli attivi (reali)</div>
+        <div class="card-value">${fmtNumber(s.activeCarts || 0)}</div>
+        <div class="card-sub">Visitatori totali: ${fmtNumber(s.uniqueVisitors || 0)}</div>
+      </div>
+    `;
+  }
+
+  function renderFunnel(s) {
+    funnelEl.innerHTML = `
+      <div class="funnel-step">
+        <div class="funnel-step-title">Pageview</div>
+        <div class="funnel-step-value">${fmtNumber(s.pageviews)}</div>
+      </div>
+      <div class="funnel-step">
+        <div class="funnel-step-title">View product</div>
+        <div class="funnel-step-value">${fmtNumber(s.productViews)}</div>
+        <div class="funnel-step-cr">CR: ${fmtPercent(s.crProductToCart || 0)} → add_to_cart</div>
+      </div>
+      <div class="funnel-step">
+        <div class="funnel-step-title">Add to cart</div>
+        <div class="funnel-step-value">${fmtNumber(s.addToCart)}</div>
+        <div class="funnel-step-cr">CR: ${fmtPercent(s.crCartToPurchase || 0)} → purchase</div>
+      </div>
+      <div class="funnel-step">
+        <div class="funnel-step-title">Purchase</div>
+        <div class="funnel-step-value">${fmtNumber(s.purchases)}</div>
+        <div class="funnel-step-cr">CR: ${fmtPercent(s.crPageviewToPurchase || 0)} da pageview</div>
+      </div>
+    `;
+  }
+
+  function renderCheckout(s) {
+    const cs = s.checkoutSteps || {};
+    checkoutEl.innerHTML = `
+      <div class="card">
+        <div class="card-title">Cart</div>
+        <div class="card-value">${fmtNumber(cs.cart || 0)}</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Checkout</div>
+        <div class="card-value">${fmtNumber(cs.checkout || 0)}</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Shipping</div>
+        <div class="card-value">${fmtNumber(cs.shipping || 0)}</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Payment</div>
+        <div class="card-value">${fmtNumber(cs.payment || 0)}</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Thank you</div>
+        <div class="card-value">${fmtNumber(cs.thankyou || 0)}</div>
+      </div>
+    `;
+  }
+
+  function renderTopPages(s) {
+    const pages = s.topPages || [];
+    if (!pages.length) {
+      topPagesEl.classList.add("muted");
+      topPagesEl.innerHTML = "Nessun dato sufficiente.";
+      return;
     }
-  }
-
-  const visitorId = getOrCreateVisitorId();
-  const sessionId = getOrCreateSessionId();
-
-  function getDaysSinceFirstVisit() {
-    try {
-      const first = localStorage.getItem("lpdc_first_visit_at");
-      if (!first) return null;
-      const t0 = new Date(first).getTime();
-      const t1 = Date.now();
-      return Math.round((t1 - t0) / (1000 * 60 * 60 * 24));
-    } catch(e) {
-      return null;
-    }
-  }
-
-  function isNewVisitorThisSession() {
-    try {
-      const flag = sessionStorage.getItem("lpdc_is_new_visitor");
-      if (flag === "0" || flag === "1") return flag === "1";
-
-      const first = localStorage.getItem("lpdc_first_visit_at");
-      const isNew = !first;
-      sessionStorage.setItem("lpdc_is_new_visitor", isNew ? "1" : "0");
-      if (isNew) {
-        localStorage.setItem("lpdc_first_visit_at", new Date().toISOString());
-      }
-      return isNew;
-    } catch(e) {
-      return false;
-    }
-  }
-
-  // ------------------ UTILS ------------------
-  function getDeviceType() {
-    const ua = navigator.userAgent || "";
-    if (/Mobile|Android|iP(hone|od)/i.test(ua)) return "mobile";
-    if (/iPad|Tablet/i.test(ua)) return "tablet";
-    return "desktop";
-  }
-
-  function parseUtm() {
-    const params = new URLSearchParams(window.location.search || "");
-    return {
-      utm_source: params.get("utm_source") || null,
-      utm_medium: params.get("utm_medium") || null,
-      utm_campaign: params.get("utm_campaign") || null
-    };
-  }
-
-  function sendEvent(payload) {
-    try {
-      const base = {
-        sessionId,
-        visitorId,
-        isNewVisitor: isNewVisitorThisSession(),
-        daysSinceFirstVisit: getDaysSinceFirstVisit(),
-        url: window.location.href,
-        path: window.location.pathname,
-        referrer: document.referrer || "",
-        deviceType: getDeviceType()
-      };
-      const utm = parseUtm();
-
-      fetch(TRACKER_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        keepalive: true,
-        body: JSON.stringify(Object.assign({}, base, utm, payload))
-      }).catch(function(){});
-    } catch(e) {}
-  }
-
-  // Esporto per eventuali altri script
-  window.lpdcSendEvent = sendEvent;
-
-  // ------------------ PAGEVIEW + TIMEONPAGE ------------------
-  window.addEventListener("DOMContentLoaded", function() {
-    sendEvent({
-      type: "pageview",
-      title: document.title || ""
+    let html = `<div class="card-title">Top pages (ultimi eventi)</div><table><tbody>`;
+    pages.forEach(p => {
+      html += `<tr><td>${p.path}</td><td style="text-align:right">${fmtNumber(p.count)}</td></tr>`;
     });
-  });
-
-  (function(){
-    let start = Date.now();
-    function flushTimeOnPage() {
-      const millis = Date.now() - start;
-      if (millis > 500) {
-        sendEvent({
-          type: "timeonpage",
-          millis: millis
-        });
-      }
-    }
-    window.addEventListener("beforeunload", flushTimeOnPage);
-    document.addEventListener("visibilitychange", function() {
-      if (document.visibilityState === "hidden") flushTimeOnPage();
-    });
-  })();
-
-  // ------------------ VIEW_PRODUCT ENRICHED (solo pagina prodotto) ------------------
-  {% if template contains 'product' and product %}
-  window.addEventListener("DOMContentLoaded", function() {
-    var productData = {
-      id: {{ product.id | json }},
-      title: {{ product.title | json }},
-      price: {{ product.price | divided_by: 100.0 | json }},
-      type: {{ product.type | json }},
-      grams: {{ product.variants.first.weight | default: 0 | json }},
-      inStock: {{ product.available | json }},
-      currency: {{ shop.currency | json }}
-    };
-
-    sendEvent({
-      type: "view_product",
-      productId: productData.id,
-      productTitle: productData.title,
-      productCategory: productData.type,
-      grams: productData.grams,
-      productPrice: productData.price,
-      currency: productData.currency,
-      inStock: productData.inStock
-    });
-
-    // MEDIA INTERACTION (immagini/video prodotto)
-    try {
-      var images = document.querySelectorAll("img, [data-product-media]");
-      images.forEach(function(img, idx) {
-        img.addEventListener("click", function() {
-          sendEvent({
-            type: "media_interaction",
-            mediaType: "image",
-            action: "open",
-            productId: productData.id,
-            mediaPosition: idx + 1
-          });
-        });
-      });
-      var vids = document.querySelectorAll("video");
-      vids.forEach(function(v, idx) {
-        v.addEventListener("play", function() {
-          sendEvent({
-            type: "media_interaction",
-            mediaType: "video",
-            action: "play",
-            productId: productData.id,
-            mediaPosition: idx + 1
-          });
-        });
-        v.addEventListener("ended", function() {
-          sendEvent({
-            type: "media_interaction",
-            mediaType: "video",
-            action: "end",
-            productId: productData.id,
-            mediaPosition: idx + 1
-          });
-        });
-      });
-    } catch(e) {}
-  });
-  {% endif %}
-
-  // ------------------ CART_STATE ------------------
-  async function sendCartState() {
-    try {
-      const res = await fetch("/cart.js", { credentials: "same-origin" });
-      if (!res.ok) return;
-      const cart = await res.json();
-      var items = (cart.items || []).map(function(item) {
-        return {
-          productId: item.product_id,
-          variantId: item.variant_id,
-          quantity: item.quantity,
-          productTitle: item.product_title,
-          linePrice: item.line_price / 100.0
-        };
-      });
-
-      sendEvent({
-        type: "cart_state",
-        items: items,
-        totalPrice: cart.total_price ? cart.total_price / 100.0 : 0,
-        currency: {{ shop.currency | json }}
-      });
-    } catch(e) {}
+    html += `</tbody></table>`;
+    topPagesEl.classList.remove("muted");
+    topPagesEl.innerHTML = html;
   }
 
-  // ------------------ FETCH OVERRIDE (add_to_cart + cart_state) ------------------
-  (function() {
-    var origFetch = window.fetch;
-    if (typeof origFetch !== "function") return;
+  function renderTraffic(s) {
+    const refs = s.topReferrers || [];
+    const utm = s.utmCombos || [];
 
-    window.fetch = function(input, init) {
-      var p = origFetch(input, init);
-      try {
-        var url = typeof input === "string" ? input : (input.url || "");
-        var options = init || {};
-        var body = options.body;
-
-        // ADD TO CART (solo per /cart/add)
-        if (typeof url === "string" && url.indexOf("/cart/add") !== -1) {
-          var variantId = null;
-          var quantity = 1;
-
-          if (body instanceof FormData) {
-            variantId = body.get("id");
-            quantity = Number(body.get("quantity") || 1);
-          } else if (typeof body === "string") {
-            try {
-              var data = JSON.parse(body);
-              variantId = data.id || data.variant_id;
-              quantity = data.quantity || 1;
-            } catch(e) {}
-          }
-
-          if (variantId) {
-            sendEvent({
-              type: "add_to_cart",
-              variantId: variantId,
-              quantity: quantity
-            });
-          }
-        }
-
-        // Qualsiasi modifica al carrello → aggiorna cart_state
-        if (
-          typeof url === "string" && (
-            url.indexOf("/cart/add")   !== -1 ||
-            url.indexOf("/cart/change")!== -1 ||
-            url.indexOf("/cart/update")!== -1 ||
-            url.indexOf("/cart/clear") !== -1 ||
-            url.endsWith("/cart.js")
-          )
-        ) {
-          setTimeout(sendCartState, 500);
-        }
-      } catch(e) {}
-
-      return p;
-    };
-  })();
-
-  // Optional: refresh periodico molto lento (o commentalo del tutto)
-  // setInterval(sendCartState, 60000); // ogni 60s se vuoi
-
-  // ------------------ CHECKOUT_STEP (best-effort) ------------------
-  function detectCheckoutStep() {
-    var path = window.location.pathname || "";
-    var step = null;
-    var index = null;
-
-    if (path.indexOf("/cart") !== -1) {
-      step = "cart"; index = 1;
-    } else if (path.indexOf("/checkout") !== -1) {
-      step = "checkout"; index = 2;
-    } else if (path.indexOf("/thank_you") !== -1 || path.indexOf("/thank-you") !== -1) {
-      step = "thankyou"; index = 5;
-    }
-
-    if (step) {
-      sendEvent({
-        type: "checkout_step",
-        step: step,
-        stepIndex: index,
-        cartValue: null,
-        currency: {{ shop.currency | json }}
-      });
-    }
-  }
-  detectCheckoutStep();
-
-  // ------------------ FORM / NEWSLETTER ------------------
-  window.addEventListener("DOMContentLoaded", function() {
-    var forms = document.querySelectorAll("form");
-    forms.forEach(function(form) {
-      var formId = form.getAttribute("id") || form.getAttribute("name") || "form_generic";
-
-      form.addEventListener("submit", function() {
-        sendEvent({
-          type: "form_interaction",
-          formId: formId,
-          action: "submit"
-        });
-      });
-
-      form.addEventListener("focusin", function() {
-        sendEvent({
-          type: "form_interaction",
-          formId: formId,
-          action: "focus"
-        });
-      });
-    });
-  });
-
-  // ------------------ JS ERROR & PROMISE ERROR ------------------
-  window.addEventListener("error", function(e) {
-    try {
-      sendEvent({
-        type: "js_error",
-        message: e.message || "",
-        source: (e.filename || "").toString(),
-        line: e.lineno || null,
-        col: e.colno || null
-      });
-    } catch(_){}
-  });
-
-  window.addEventListener("unhandledrejection", function(e) {
-    try {
-      sendEvent({
-        type: "js_error",
-        message: (e.reason && e.reason.message) ? e.reason.message : "unhandledrejection",
-        source: "promise",
-        line: null,
-        col: null
-      });
-    } catch(_){}
-  });
-
-  // ------------------ PERFORMANCE METRICS ------------------
-  (function() {
-    function sendPerf() {
-      try {
-        var perf = window.performance;
-        if (!perf) return;
-
-        var ttfb = 0;
-        if (perf.getEntriesByType) {
-          var navEntries = perf.getEntriesByType("navigation");
-          if (navEntries && navEntries[0]) {
-            ttfb = navEntries[0].responseStart;
-          }
-        }
-
-        var fcp = 0;
-        var lcp = 0;
-        if ("getEntriesByType" in perf) {
-          var paints = perf.getEntriesByType("paint") || [];
-          paints.forEach(function(p) {
-            if (p.name === "first-contentful-paint") {
-              fcp = p.startTime;
-            }
-          });
-        }
-
-        if ("PerformanceObserver" in window) {
-          try {
-            var po = new PerformanceObserver(function(list) {
-              var entries = list.getEntries();
-              entries.forEach(function(entry) {
-                if (entry.entryType === "largest-contentful-paint") {
-                  lcp = entry.startTime;
-                }
-              });
-            });
-            po.observe({ type: "largest-contentful-paint", buffered: true });
-          } catch(e) {}
-        }
-
-        setTimeout(function() {
-          sendEvent({
-            type: "perf_metric",
-            lcp: lcp || null,
-            fcp: fcp || null,
-            ttfb: ttfb || null
-          });
-        }, 2000);
-      } catch(e) {}
-    }
-
-    if (document.readyState === "complete") {
-      sendPerf();
+    if (!refs.length) {
+      trafficEl.classList.add("muted");
+      trafficEl.innerHTML = "Nessun dato referrer disponibile.";
     } else {
-      window.addEventListener("load", function() {
-        sendPerf();
+      let html = `<div class="card-title">Fonti di traffico (referrer)</div><table><tbody>`;
+      refs.forEach(r => {
+        html += `<tr><td>${r.source}</td><td style="text-align:right">${fmtNumber(r.count)}</td></tr>`;
       });
+      html += `</tbody></table>`;
+      trafficEl.classList.remove("muted");
+      trafficEl.innerHTML = html;
     }
-  })();
 
+    if (!utm.length) {
+      utmEl.classList.add("muted");
+      utmEl.innerHTML = "Nessuna UTM rilevata.";
+    } else {
+      let html = `<div class="card-title">UTM (ultime campagne)</div><table><tbody>`;
+      utm.forEach(u => {
+        html += `<tr><td>source: <b>${u.source}</b> · medium: <b>${u.medium}</b> · campaign: <b>${u.campaign}</b></td><td style="text-align:right">${fmtNumber(u.count)}</td></tr>`;
+      });
+      html += `</tbody></table>`;
+      utmEl.classList.remove("muted");
+      utmEl.innerHTML = html;
+    }
+  }
+
+  function renderProductsAndMedia(s) {
+    const cat = s.productCategories || {};
+    const grams = s.gramsViews || {};
+    const media = s.mediaInteractions || {};
+
+    // categorie
+    const catEntries = Object.entries(cat);
+    if (!catEntries.length) {
+      productCatEl.classList.add("muted");
+      productCatEl.innerHTML = "Nessun dato prodotti.";
+    } else {
+      let html = `<div class="card-title">Categorie prodotto (view_product)</div><table><tbody>`;
+      catEntries.sort((a,b) => b[1]-a[1]).forEach(([name,val]) => {
+        html += `<tr><td>${name}</td><td style="text-align:right">${fmtNumber(val)}</td></tr>`;
+      });
+      html += `</tbody></table>`;
+      productCatEl.classList.remove("muted");
+      productCatEl.innerHTML = html;
+    }
+
+    // grammi
+    const gramsEntries = Object.entries(grams);
+    if (!gramsEntries.length) {
+      gramsEl.classList.add("muted");
+      gramsEl.innerHTML = "Nessun dato grammi.";
+    } else {
+      let html = `<div class="card-title">Grammature viste</div><table><tbody>`;
+      gramsEntries.sort((a,b) => Number(a[0]) - Number(b[0])).forEach(([g,val]) => {
+        html += `<tr><td>${g} g</td><td style="text-align:right">${fmtNumber(val)}</td></tr>`;
+      });
+      html += `</tbody></table>`;
+      gramsEl.classList.remove("muted");
+      gramsEl.innerHTML = html;
+    }
+
+    // media
+    const mediaEntries = Object.entries(media);
+    if (!mediaEntries.length) {
+      mediaEl.classList.add("muted");
+      mediaEl.innerHTML = "Nessuna interazione media.";
+    } else {
+      let html = `<div class="card-title">Interazioni media</div><table><tbody>`;
+      mediaEntries.forEach(([k,val]) => {
+        const [type,action] = k.split(":");
+        html += `<tr><td>${type} · ${action}</td><td style="text-align:right">${fmtNumber(val)}</td></tr>`;
+      });
+      html += `</tbody></table>`;
+      mediaEl.classList.remove("muted");
+      mediaEl.innerHTML = html;
+    }
+  }
+
+  function renderGeoAndTech(s) {
+    const countries = s.countries || {};
+    const geoEntries = Object.entries(countries);
+
+    if (!geoEntries.length) {
+      geoEl.classList.add("muted");
+      geoEl.innerHTML = "Nessun dato geografico.";
+    } else {
+      let html = `<div class="card-title">Paesi (ultimi eventi)</div><table><tbody>`;
+      geoEntries.sort((a,b) => b[1]-a[1]).forEach(([c,val]) => {
+        html += `<tr><td>${c}</td><td style="text-align:right">${fmtNumber(val)}</td></tr>`;
+      });
+      html += `</tbody></table>`;
+      geoEl.classList.remove("muted");
+      geoEl.innerHTML = html;
+    }
+
+    const perf = s.perfSummary || {};
+    const jsErrors = s.jsErrors || 0;
+    const payErrors = s.paymentErrors || 0;
+
+    let html = `<div class="card-title">Salute tecnica</div><div class="card-sub">Errori JS: ${fmtNumber(jsErrors)} · Errori pagamento: ${fmtNumber(payErrors)}</div>`;
+    if (perf.samples) {
+      html += `<div class="card-sub" style="margin-top:8px;">
+        LCP medio: ${perf.avgLcp ? perf.avgLcp.toFixed(0) + " ms" : "-"} ·
+        FCP medio: ${perf.avgFcp ? perf.avgFcp.toFixed(0) + " ms" : "-"} ·
+        TTFB medio: ${perf.avgTtfb ? perf.avgTtfb.toFixed(0) + " ms" : "-"}
+      </div>`;
+    }
+    techEl.classList.remove("muted");
+    techEl.innerHTML = html;
+  }
+
+  // ------------------ EVENTI RECENTI ------------------
+
+  function rangeParamFromFilter() {
+    const v = filterTimeEl.value;
+    if (v === "all") return null;
+    if (v === "7")   return "7d";
+    if (v === "30")  return "30d";
+    if (v === "90")  return "90d";
+    if (v === "180") return "180d";
+    if (v === "365") return "365d";
+    return null;
+  }
+
+  async function loadEvents() {
+    const range = rangeParamFromFilter();
+    let url = "/api/events?limit=500";
+    if (range) url += "&range=" + encodeURIComponent(range);
+
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.error("Errore /api/events", res.status);
+      return;
+    }
+    ALL_EVENTS = await res.json();
+    renderEvents();
+  }
+
+  function describeEvent(p) {
+    if (!p || !p.type) return "";
+    switch (p.type) {
+      case "pageview":
+        return p.title || "";
+      case "timeonpage":
+        if (typeof p.millis === "number") {
+          return "Tempo sulla pagina: " + (p.millis / 1000).toFixed(1) + " s";
+        }
+        return "";
+      case "view_product":
+        return (p.productTitle || "") + (p.grams ? ` · ${p.grams} g` : "");
+      case "add_to_cart":
+        return "Variant " + (p.variantId || "") + " x" + (p.quantity || 1);
+      case "cart_state":
+        return (p.items && p.items.length ? `${p.items.length} righe in carrello` : "Carrello vuoto");
+      case "checkout_step":
+        return `Step: ${p.step || ""} (#${p.stepIndex || ""})`;
+      case "media_interaction":
+        return `${p.mediaType || "media"} · ${p.action || ""}`;
+      case "js_error":
+        return p.message || "";
+      default:
+        return "";
+    }
+  }
+
+  function renderEvents() {
+    const typeFilter = filterTypeEl.value;
+    const textFilter = filterTextEl.value.toLowerCase();
+
+    const rows = [];
+    ALL_EVENTS.forEach(ev => {
+      const p = ev.payload || {};
+      const type = p.type || "unknown";
+      const when = ev.receivedAt ? new Date(ev.receivedAt) : null;
+      const url = p.path || p.url || "";
+      const details = describeEvent(p);
+
+      if (typeFilter !== "all" && type !== typeFilter) return;
+      const blob = (url + " " + (details || "")).toLowerCase();
+      if (textFilter && !blob.includes(textFilter)) return;
+
+      rows.push({ when, type, url, details });
+    });
+
+    tbodyEl.innerHTML = "";
+    rows.forEach(r => {
+      const tr = document.createElement("tr");
+      const tdWhen = document.createElement("td");
+      const tdType = document.createElement("td");
+      const tdUrl  = document.createElement("td");
+      const tdDet  = document.createElement("td");
+
+      tdWhen.textContent = r.when ? r.when.toLocaleString("it-IT") : "";
+      tdType.textContent = r.type;
+      tdUrl.textContent  = r.url;
+      tdDet.textContent  = r.details;
+
+      tr.appendChild(tdWhen);
+      tr.appendChild(tdType);
+      tr.appendChild(tdUrl);
+      tr.appendChild(tdDet);
+      tbodyEl.appendChild(tr);
+    });
+
+    rowsInfoEl.textContent = rows.length
+      ? `${rows.length} eventi mostrati`
+      : "0 eventi mostrati";
+  }
+
+  // ------------------ INIT ------------------
+  filterTimeEl.addEventListener("change", loadEvents);
+  filterTypeEl.addEventListener("change", renderEvents);
+  filterTextEl.addEventListener("input", renderEvents);
+
+  loadSummary();
+  loadEvents();
 })();
 </script>
+
 
 </body>
 </html>
