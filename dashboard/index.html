@@ -542,8 +542,20 @@
         return "";
       case "view_product":
         return (p.productTitle || "") + (p.grams ? ` · ${p.grams} g` : "");
-      case "add_to_cart":
-        return "Variant " + (p.variantId || "") + " x" + (p.quantity || 1);
+      case "add_to_cart": {
+        var qty = p.quantity || 1;
+
+        if (p.productTitle) {
+          var label = p.productTitle;
+          if (p.grams) {
+            label += " " + p.grams + " g";
+          }
+          return label + " x" + qty;
+        }
+
+        // fallback se non abbiamo productTitle
+        return "Variant " + (p.variantId || "") + " x" + qty;
+      }
       case "cart_state":
         return (p.items && p.items.length ? `${p.items.length} righe in carrello` : "Carrello vuoto");
       case "checkout_step":
