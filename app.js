@@ -41,50 +41,59 @@ function anonymizeIp(ip) {
 
 // ------------------ /collect: riceve gli eventi dal tema Shopify ------------------
 app.post("/collect", async (req, res) => {
-  const clientIp =
-    req.headers["x-forwarded-for"]?.split(",")[0] ||
-    req.socket.remoteAddress ||
-    "";
-
-  const entry = {
-    occurred_at: new Date().toISOString(),
-    ip: anonymizeIp(clientIp),
-    userAgent: req.headers["user-agent"] || "",
-    payload: req.body || {},
-  };
-
-  if (payload.type === "add_to_cart") {
-    const key = [
-      payload.sessionId || "",
-      payload.visitorId || "",
-      payload.variantId || "",
-      payload.quantity || 1
-    ].join("|");
-
-    const now = Date.now();
-    const last = recentAddToCart.get(key);
-    if (last && (now - last) < ADD_DEDUP_MS) {
-      console.log("Skip duplicate add_to_cart:", key);
-      return res.status(200).json({ ok: true, skipped: "duplicate_add_to_cart" });
-    }
-    recentAddToCart.set(key, now);
-  }
-
-  console.log("Evento /collect:", entry.payload?.type, entry.payload?.url || "");
-
   try {
-    await pool.query(
-      `INSERT INTO events (occurred_at, ip, user_agent, payload)
-       VALUES ($1, $2, $3, $4)`,
-      [entry.occurred_at, entry.ip, entry.userAgent, entry.payload]
-    );
-  } catch (err) {
-    console.error("Errore inserendo evento in Postgres:", err);
-    // non blocchiamo il browser
-  }
+    // 1) PRIMA DI TUTTO: leggo il body
+    const payload = req.body || {};
 
-  res.status(204).end();
+    // 2) Deduplica solo per add_to_cart
+    if (payload.type === "add_to_cart") {
+      const key = [
+        payload.sessionId || "",
+        payload.visitorId || "",
+        payload.variantId || "",
+        payload.quantity || 1
+      ].join("|");
+
+      const now = Date.now();
+      const last = recentAddToCart.get(key);
+
+      if (last && (now - last) < ADD_DEDUP_MS) {
+        console.log("Skip duplicate add_to_cart:", key);
+        return res.status(200).json({ ok: true, skipped: "duplicate_add_to_cart" });
+      }
+
+      recentAddToCart.set(key, now);
+    }
+
+    // 3) Dati tecnici base
+    const ip =
+      (req.headers["x-forwarded-for"] || "")
+        .split(",")[0]
+        .trim() ||
+      req.socket.remoteAddress ||
+      null;
+
+    const userAgent = req.headers["user-agent"] || "";
+
+    console.log(
+      "Evento /collect:",
+      payload.type,
+      payload.url || payload.path || ""
+    );
+
+    // 4) Salvataggio su DB (come prima)
+    await pool.query(
+      "INSERT INTO events (occurred_at, ip, user_agent, payload) VALUES (NOW(), $1, $2, $3)",
+      [ip, userAgent, payload]
+    );
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("Errore in /collect:", err);
+    return res.status(500).json({ ok: false, error: "internal_error" });
+  }
 });
+
 
 // ------------------ helper: leggi ultimi N eventi ------------------
 async function readLastEvents(limit = null) {
