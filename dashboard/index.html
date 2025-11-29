@@ -274,20 +274,17 @@
     return x.toFixed(1).replace(".", ",") + "%";
   }
 
-  // ------------------ SUMMARY ------------------
-  async function loadSummary() {
+// ------------------ SUMMARY ------------------
+async function loadSummary() {
+  try {
     const res = await fetch("/api/summary?range=7d");
-    .then(r => r.json())
-    .then(summary => {
-      renderOverview(summary);
-      renderFunnel(summary);
-      // ...
-
     if (!res.ok) {
       console.error("Errore /api/summary", res.status);
       return;
     }
+
     const s = await res.json();
+
     renderOverview(s);
     renderFunnel(s);
     renderCheckout(s);
@@ -295,7 +292,11 @@
     renderTraffic(s);
     renderProductsAndMedia(s);
     renderGeoAndTech(s);
+
+  } catch (err) {
+    console.error("loadSummary error", err);
   }
+}
 
   function renderOverview(s) {
     overviewEl.innerHTML = `
