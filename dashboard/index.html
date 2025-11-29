@@ -277,6 +277,12 @@
   // ------------------ SUMMARY ------------------
   async function loadSummary() {
     const res = await fetch("/api/summary?range=7d");
+    .then(r => r.json())
+    .then(summary => {
+      renderOverview(summary);
+      renderFunnel(summary);
+      // ...
+
     if (!res.ok) {
       console.error("Errore /api/summary", res.status);
       return;
