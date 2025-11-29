@@ -197,7 +197,12 @@ res.json(events);
 app.get("/api/summary", async (req, res) => {
   try {
     // leggi al massimo 500 eventi recenti per evitare di saturare la memoria
-    const events = await readLastEvents(500);
+    const events = await readLastEvents(10000);
+    console.log("SUMMARY – eventi letti:", events.length);
+    console.log(
+      "SUMMARY – primi tipi:",
+      events.slice(0, 10).map(ev => (ev.payload && ev.payload.type) || "no-type")
+    );
 
     const stats = {
       totalEvents: events.length,
@@ -296,7 +301,7 @@ app.get("/api/summary", async (req, res) => {
       // conteggi funnel
       if (type === "pageview") stats.pageviews++;
       else if (type === "timeonpage") stats.timeonpageEvents++;
-      else if (type === "view_product") stats.productViews++;
+      //else if (type === "view_product") stats.productViews++;
       else if (type === "add_to_cart") stats.addToCart++;
       else if (type === "purchase") stats.purchases++;
 
