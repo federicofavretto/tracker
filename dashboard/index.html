@@ -276,7 +276,7 @@
 
   // ------------------ SUMMARY ------------------
   async function loadSummary() {
-    const res = await fetch("/api/summary");
+    const res = await fetch("/api/summary?range=7d");
     if (!res.ok) {
       console.error("Errore /api/summary", res.status);
       return;

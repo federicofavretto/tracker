@@ -119,6 +119,46 @@ async function readLastEvents(limit = null) {
   }));
 }
 
+/**
+ * Legge gli eventi in base a un range temporale testuale.
+ * range può essere: "24h", "1d", "7d", "30d", "90d"
+ * Default: "7d".
+ */
+async function readEventsInRange(range) {
+  let interval;
+
+  switch (range) {
+    case "24h":
+    case "1d":
+      interval = "1 day";
+      break;
+    case "7d":
+      interval = "7 days";
+      break;
+    case "30d":
+      interval = "30 days";
+      break;
+    case "90d":
+      interval = "90 days";
+      break;
+    default:
+      interval = "7 days"; // default "di sicurezza"
+      break;
+  }
+
+  const result = await pool.query(
+    `
+    SELECT occurred_at, ip, user_agent, payload
+    FROM events
+    WHERE occurred_at >= NOW() - $1::interval
+    ORDER BY occurred_at DESC
+    `,
+    [interval]
+  );
+
+  return result.rows;
+}
+
 // ------------------ /api/events: per la tabella in basso ------------------
 app.get("/api/events", async (req, res) => {
   const limit = Number(req.query.limit) || 300;
@@ -196,8 +236,12 @@ res.json(events);
 // ------------------ /api/summary: numeri per la dashboard ------------------
 app.get("/api/summary", async (req, res) => {
   try {
-    // leggi al massimo 500 eventi recenti per evitare di saturare la memoria
-    const events = await readLastEvents(10000);
+    // range: "24h", "7d", "30d", ecc. Default = "7d"
+    const range = req.query.range || "7d";
+
+    // leggiamo gli eventi in base al range temporale, NON solo agli ultimi N
+    const events = await readEventsInRange(range);
+
     console.log("SUMMARY – eventi letti:", events.length);
     console.log(
       "SUMMARY – primi tipi:",
