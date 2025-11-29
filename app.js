@@ -122,7 +122,7 @@ async function readLastEvents(limit = null) {
 // ------------------ /api/events: per la tabella in basso ------------------
 app.get("/api/events", async (req, res) => {
   const limit = Number(req.query.limit) || 300;
-  const range = req.query.range || null; // opzionale, tipo '7d', '30d'
+  const range = req.query.range || "7d"; // opzionale, tipo null '7d', '30d'
 
   const ranges = {
     "7d": "NOW() - INTERVAL '7 days'",
