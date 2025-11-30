@@ -274,29 +274,32 @@
     return x.toFixed(1).replace(".", ",") + "%";
   }
 
-// ------------------ SUMMARY ------------------
-async function loadSummary() {
-  try {
-    const res = await fetch("/api/summary?range=7d");
-    if (!res.ok) {
-      console.error("Errore /api/summary", res.status);
-      return;
+  // ------------------ SUMMARY ------------------
+  async function loadSummary() {
+    try {
+      // tolto ?range=7d per essere compatibili con il tuo /api/summary attuale
+      const res = await fetch("/api/summary");
+      if (!res.ok) {
+        console.error("Errore /api/summary", res.status);
+        return;
+      }
+
+      const raw = await res.json();
+      // gestiamo sia il caso { pageviews: ... } sia il caso { summary: {...} }
+      const s = raw && raw.summary ? raw.summary : raw;
+
+      renderOverview(s);
+      renderFunnel(s);
+      renderCheckout(s);
+      renderTopPages(s);
+      renderTraffic(s);
+      renderProductsAndMedia(s);
+      renderGeoAndTech(s);
+
+    } catch (err) {
+      console.error("loadSummary error", err);
     }
-
-    const s = await res.json();
-
-    renderOverview(s);
-    renderFunnel(s);
-    renderCheckout(s);
-    renderTopPages(s);
-    renderTraffic(s);
-    renderProductsAndMedia(s);
-    renderGeoAndTech(s);
-
-  } catch (err) {
-    console.error("loadSummary error", err);
   }
-}
 
   function renderOverview(s) {
     overviewEl.innerHTML = `
@@ -513,7 +516,7 @@ async function loadSummary() {
   // ------------------ EVENTI RECENTI ------------------
 
   function rangeParamFromFilter() {
-    const v = filterTimeEl.value;
+    const v = filterTimeEl ? filterTimeEl.value : "7";
     if (v === "all") return null;
     if (v === "7")   return "7d";
     if (v === "30")  return "30d";
@@ -524,17 +527,25 @@ async function loadSummary() {
   }
 
   async function loadEvents() {
-    const range = rangeParamFromFilter();
-    let url = "/api/events?limit=500";
-    if (range) url += "&range=" + encodeURIComponent(range);
+    try {
+      const range = rangeParamFromFilter();
+      let url = "/api/events?limit=500";
+      if (range) url += "&range=" + encodeURIComponent(range);
 
-    const res = await fetch(url);
-    if (!res.ok) {
-      console.error("Errore /api/events", res.status);
-      return;
+      const res = await fetch(url);
+      if (!res.ok) {
+        console.error("Errore /api/events", res.status);
+        return;
+      }
+
+      const data = await res.json();
+      // compatibile con sia [ {event}, ... ] che { events: [...] }
+      ALL_EVENTS = Array.isArray(data) ? data : (data.events || []);
+
+      renderEvents();
+    } catch (err) {
+      console.error("loadEvents error", err);
     }
-    ALL_EVENTS = await res.json();
-    renderEvents();
   }
 
   function describeEvent(p) {
@@ -571,8 +582,6 @@ async function loadSummary() {
         // fallback
         return "Variant " + (p.variantId || "") + " x" + qty;
       }
-
-
       case "cart_state":
         return (p.items && p.items.length ? `${p.items.length} righe in carrello` : "Carrello vuoto");
       case "checkout_step":
@@ -587,8 +596,8 @@ async function loadSummary() {
   }
 
   function renderEvents() {
-    const typeFilter = filterTypeEl.value;
-    const textFilter = filterTextEl.value.toLowerCase();
+    const typeFilter = filterTypeEl ? filterTypeEl.value : "all";
+    const textFilter = filterTextEl ? filterTextEl.value.toLowerCase() : "";
 
     const rows = [];
     ALL_EVENTS.forEach(ev => {
@@ -631,15 +640,20 @@ async function loadSummary() {
   }
 
   // ------------------ INIT ------------------
-  filterTimeEl.addEventListener("change", loadEvents);
-  filterTypeEl.addEventListener("change", renderEvents);
-  filterTextEl.addEventListener("input", renderEvents);
+  if (filterTimeEl) {
+    filterTimeEl.addEventListener("change", loadEvents);
+  }
+  if (filterTypeEl) {
+    filterTypeEl.addEventListener("change", renderEvents);
+  }
+  if (filterTextEl) {
+    filterTextEl.addEventListener("input", renderEvents);
+  }
 
   loadSummary();
   loadEvents();
 })();
 </script>
-
 
 </body>
 </html>
