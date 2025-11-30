@@ -275,31 +275,63 @@
   }
 
   // ------------------ SUMMARY ------------------
-  async function loadSummary() {
-    try {
-      // tolto ?range=7d per essere compatibili con il tuo /api/summary attuale
-      const res = await fetch("/api/summary");
-      if (!res.ok) {
-        console.error("Errore /api/summary", res.status);
-        return;
-      }
-
-      const raw = await res.json();
-      // gestiamo sia il caso { pageviews: ... } sia il caso { summary: {...} }
-      const s = raw && raw.summary ? raw.summary : raw;
-
-      renderOverview(s);
-      renderFunnel(s);
-      renderCheckout(s);
-      renderTopPages(s);
-      renderTraffic(s);
-      renderProductsAndMedia(s);
-      renderGeoAndTech(s);
-
-    } catch (err) {
-      console.error("loadSummary error", err);
+// ------------------ SUMMARY ------------------
+async function loadSummary() {
+  try {
+    // niente ?range=7d, il tuo backend /api/summary non gestisce quel parametro
+    const res = await fetch("/api/summary");
+    if (!res.ok) {
+      console.error("Errore /api/summary", res.status);
+      // mostriamo qualcosa anche in caso di errore
+      overviewEl.innerHTML = `
+        <div class="card">
+          <div class="card-title">Errore summary</div>
+          <div class="card-value">-</div>
+          <div class="card-sub">HTTP ${res.status}</div>
+        </div>
+      `;
+      return;
     }
+
+    const raw = await res.json();
+    // caso 1: API restituisce direttamente i campi (pageviews, ecc.)
+    // caso 2: API restituisce { summary: {...} }
+    const s = raw && raw.summary ? raw.summary : raw;
+
+    // se per qualche motivo s non è un oggetto, evitiamo crash
+    if (!s || typeof s !== "object") {
+      console.error("Formato summary inatteso:", raw);
+      overviewEl.innerHTML = `
+        <div class="card">
+          <div class="card-title">Nessun dato</div>
+          <div class="card-value">0</div>
+          <div class="card-sub">/api/summary ha risposto ma senza campi validi</div>
+        </div>
+      `;
+      return;
+    }
+
+    renderOverview(s);
+    renderFunnel(s);
+    renderCheckout(s);
+    renderTopPages(s);
+    renderTraffic(s);
+    renderProductsAndMedia(s);
+    renderGeoAndTech(s);
+
+  } catch (err) {
+    console.error("loadSummary error", err);
+    // fallback visivo, così l’utente non vede la dashboard “vuota”
+    overviewEl.innerHTML = `
+      <div class="card">
+        <div class="card-title">Errore JS</div>
+        <div class="card-value">-</div>
+        <div class="card-sub">${(err && err.message) || "Errore sconosciuto"}</div>
+      </div>
+    `;
   }
+}
+
 
   function renderOverview(s) {
     overviewEl.innerHTML = `
@@ -526,27 +558,30 @@
     return null;
   }
 
-  async function loadEvents() {
-    try {
-      const range = rangeParamFromFilter();
-      let url = "/api/events?limit=500";
-      if (range) url += "&range=" + encodeURIComponent(range);
+async function loadEvents() {
+  try {
+    const range = rangeParamFromFilter();
+    let url = "/api/events?limit=500";
+    if (range) url += "&range=" + encodeURIComponent(range);
 
-      const res = await fetch(url);
-      if (!res.ok) {
-        console.error("Errore /api/events", res.status);
-        return;
-      }
-
-      const data = await res.json();
-      // compatibile con sia [ {event}, ... ] che { events: [...] }
-      ALL_EVENTS = Array.isArray(data) ? data : (data.events || []);
-
-      renderEvents();
-    } catch (err) {
-      console.error("loadEvents error", err);
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.error("Errore /api/events", res.status);
+      return;
     }
+
+    const data = await res.json();
+    // compatibile con entrambi i casi:
+    //  - [ {event}, ... ]
+    //  - { events: [ ... ] }
+    ALL_EVENTS = Array.isArray(data) ? data : (data.events || []);
+
+    renderEvents();
+  } catch (err) {
+    console.error("loadEvents error", err);
   }
+}
+
 
   function describeEvent(p) {
     if (!p || !p.type) return "";
