@@ -15,7 +15,10 @@ const ADD_DEDUP_MS = 2000;
 // ------------------ MIDDLEWARE ------------------
 app.use(
   cors({
-    origin: true,
+    origin: [
+      "https://laperleducaviar.com",
+      "https://www.laperleducaviar.com"
+    ],
     methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type"],
   })
