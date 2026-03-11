@@ -136,7 +136,6 @@
       margin-top: 10px;
       margin-bottom: 4px;
       font-size: 12px;
-      flex-wrap: wrap;
     }
     .select, .input {
       background: #050814;
@@ -167,19 +166,6 @@
   <div class="section-title">Funnel principale</div>
   <div id="funnel" class="funnel"></div>
 
-  <h2>Funnel</h2>
-  <div id="funnel"></div>
-
-  <h2>Traffic sources</h2>
-  <div id="sources"></div>
-
-  <h2>Countries</h2>
-  <div id="geo"></div>
-  
-  <!-- Checkout -->
-  <div class="section-title">Funnel checkout</div>
-  <div id="checkoutSteps" class="grid"></div>
-
   <!-- Pagine più viste -->
   <div class="section-title">Pagine più viste</div>
   <div id="topPages" class="card muted">Nessun dato sufficiente.</div>
@@ -191,52 +177,38 @@
     <div id="utmSources" class="card muted">Nessuna UTM rilevata.</div>
   </div>
 
-  <!-- Prodotti e media -->
-  <div class="section-title">Prodotti e interazioni media</div>
-  <div class="grid">
-    <div id="productCategories" class="card muted">Nessun dato prodotti.</div>
-    <div id="gramsViews" class="card muted">Nessun dato grammi.</div>
-    <div id="mediaInteractions" class="card muted">Nessuna interazione media.</div>
-  </div>
-
-  <!-- Geo & salute tecnica -->
-  <div class="section-title">Geo & salute tecnica</div>
-  <div class="grid">
-    <div id="geoStats" class="card muted">Nessun dato geografico.</div>
-    <div id="techHealth" class="card muted">Nessun dato tecnico.</div>
-  </div>
-
   <!-- Eventi recenti -->
-  <div class="section-title">Eventi recenti</div>
- 
-  <div class="filters">
-    <label>Periodo:
-      <select id="filterTime" class="select">
-        <option value="7">Ultimi 7 giorni</option>
-        <option value="30">Ultimi 30 giorni</option>
-        <option value="90">Ultimi 3 mesi</option>
-        <option value="180">Ultimi 6 mesi</option>
-        <option value="365">Ultimo anno</option>
-        <option value="all">Tutto</option>
-      </select>
-    </label>
+<div class="section-title">Eventi recenti</div>
 
-    <label>Tipo:
-      <select id="filterType" class="select">
-        <option value="all">Tutti</option>
-        <option value="pageview">pageview</option>
-        <option value="timeonpage">timeonpage</option>
-        <option value="view_product">view_product</option>
-        <option value="add_to_cart">add_to_cart</option>
-        <option value="purchase">purchase</option>
-        <option value="scroll">scroll</option>
-        <option value="cta_click">cta_click</option>
-      </select>
-    </label>
+<div class="filters">
+  <label>Periodo:
+    <select id="filterTime" class="select">
+      <option value="7">Ultimi 7 giorni</option>
+      <option value="30">Ultimi 30 giorni</option>
+      <option value="90">Ultimi 3 mesi</option>
+      <option value="180">Ultimi 6 mesi</option>
+      <option value="365">Ultimo anno</option>
+      <option value="all">Tutto</option>
+    </select>
+  </label>
 
-    <input id="filterText" class="input" placeholder="Cerca in URL / titolo / dettagli" />
-    <span id="rowsInfo" class="muted"></span>
-  </div>
+  <label>Tipo:
+    <select id="filterType" class="select">
+      <option value="all">Tutti</option>
+      <option value="pageview">pageview</option>
+      <option value="timeonpage">timeonpage</option>
+      <option value="view_product">view_product</option>
+      <option value="add_to_cart">add_to_cart</option>
+      <option value="purchase">purchase</option>
+      <option value="scroll">scroll</option>
+      <option value="cta_click">cta_click</option>
+    </select>
+  </label>
+
+  <input id="filterText" class="input" placeholder="Cerca in URL / titolo / dettagli" />
+
+  <span id="rowsInfo" class="muted"></span>
+</div>
 
   <div class="card">
     <table>
@@ -252,483 +224,246 @@
     </table>
   </div>
 
-<script>
-(function () {
-  const overviewEl      = document.getElementById("overview");
-  const funnelEl        = document.getElementById("funnel");
-  const checkoutEl      = document.getElementById("checkoutSteps");
-  const topPagesEl      = document.getElementById("topPages");
-  const trafficEl       = document.getElementById("trafficSources");
-  const utmEl           = document.getElementById("utmSources");
-  const productCatEl    = document.getElementById("productCategories");
-  const gramsEl         = document.getElementById("gramsViews");
-  const mediaEl         = document.getElementById("mediaInteractions");
-  const geoEl           = document.getElementById("geoStats");
-  const techEl          = document.getElementById("techHealth");
-  const tbodyEl         = document.getElementById("eventsTableBody");
-  const filterTimeEl    = document.getElementById("filterTime");
-  const filterTypeEl    = document.getElementById("filterType");
-  const filterTextEl    = document.getElementById("filterText");
-  const rowsInfoEl      = document.getElementById("rowsInfo");
+  <script>
+    let ALL_EVENTS = [];
 
-  let ALL_EVENTS = [];
-
-  function fmtNumber(n) {
-    if (!n) return "0";
-    return Number(n).toLocaleString("it-IT");
-  }
-
-  function fmtPercent(x) {
-    if (!x) return "0%";
-    return x.toFixed(1).replace(".", ",") + "%";
-  }
-
-// ------------------ SUMMARY ----------------
-async function loadSummary() {
-  try {
-    // niente ?range=7d, il tuo backend /api/summary non gestisce quel parametro
-    const res = await fetch("/api/summary");
-    if (!res.ok) {
-      console.error("Errore /api/summary", res.status);
-      // mostriamo qualcosa anche in caso di errore
-      overviewEl.innerHTML = `
-        <div class="card">
-          <div class="card-title">Errore summary</div>
-          <div class="card-value">-</div>
-          <div class="card-sub">HTTP ${res.status}</div>
-        </div>
-      `;
-      return;
+    function esc(str) {
+      if (str == null) return "";
+      return String(str)
+        .replace(/&/g,"&amp;")
+        .replace(/</g,"&lt;")
+        .replace(/>/g,"&gt;")
+        .replace(/"/g,"&quot;");
     }
 
-    const raw = await res.json();
-    // caso 1: API restituisce direttamente i campi (pageviews, ecc.)
-    // caso 2: API restituisce { summary: {...} }
-    const s = raw && raw.summary ? raw.summary : raw;
+    function renderOverview(summary) {
+      const el = document.getElementById("overview");
+      const devices = summary.devices || {desktop:0, mobile:0, tablet:0, other:0};
 
-    // se per qualche motivo s non è un oggetto, evitiamo crash
-    if (!s || typeof s !== "object") {
-      console.error("Formato summary inatteso:", raw);
-      overviewEl.innerHTML = `
-        <div class="card">
-          <div class="card-title">Nessun dato</div>
-          <div class="card-value">0</div>
-          <div class="card-sub">/api/summary ha risposto ma senza campi validi</div>
-        </div>
-      `;
-      return;
+      const cards = [
+        { label: "Sessioni uniche", value: summary.uniqueSessions || 0 },
+        { label: "Visitatori unici", value: summary.uniqueVisitors || 0 },
+        { label: "Nuovi / di ritorno", value: (summary.newVisitors||0) + " / " + (summary.returningVisitors||0) },
+        { label: "Pageview", value: summary.pageviews || 0 },
+        { label: "Viste prodotto", value: summary.productViews || 0 },
+        { label: "Add to cart", value: summary.addToCart || 0 },
+        { label: "Carrelli attivi (reali)", value: summary.activeCarts || 0 },
+        { label: "Acquisti", value: summary.purchases || 0 },
+        { label: "Device (M/D/T)", value: (devices.mobile||0) + " / " + (devices.desktop||0) + " / " + (devices.tablet||0) }
+      ];
+
+      el.innerHTML = cards.map(c =>
+        '<div class="card">' +
+          '<div class="card-title">'+ esc(c.label) +'</div>' +
+          '<div class="card-value">'+ esc(c.value) +'</div>' +
+        '</div>'
+      ).join("");
     }
 
-    renderOverview(s);
-    renderFunnel(s);
-    renderCheckout(s);
-    renderTopPages(s);
-    renderTraffic(s);
-    renderProductsAndMedia(s);
-    renderGeoAndTech(s);
+    function renderFunnel(summary) {
+      const el = document.getElementById("funnel");
+      const pv = summary.pageviews || 0;
+      const vp = summary.productViews || 0;
+      const atc = summary.addToCart || 0;
+      const pur = summary.purchases || 0;
 
-  } catch (err) {
-    console.error("loadSummary error", err);
-    // fallback visivo, così l’utente non vede la dashboard “vuota”
-    overviewEl.innerHTML = `
-      <div class="card">
-        <div class="card-title">Errore JS</div>
-        <div class="card-value">-</div>
-        <div class="card-sub">${(err && err.message) || "Errore sconosciuto"}</div>
-      </div>
-    `;
-  }
-}
-
-
-
-  function renderOverview(s) {
-    overviewEl.innerHTML = `
-      <div class="card">
-        <div class="card-title">Pageview</div>
-        <div class="card-value">${fmtNumber(s.pageviews)}</div>
-        <div class="card-sub">CR: ${fmtPercent(s.crPageviewToPurchase || 0)} → purchase</div>
-      </div>
-      <div class="card">
-        <div class="card-title">View product</div>
-        <div class="card-value">${fmtNumber(s.productViews)}</div>
-        <div class="card-sub">CR: ${fmtPercent(s.crProductToCart || 0)} → add_to_cart</div>
-      </div>
-      <div class="card">
-        <div class="card-title">Add to cart</div>
-        <div class="card-value">${fmtNumber(s.addToCart)}</div>
-        <div class="card-sub">CR: ${fmtPercent(s.crCartToPurchase || 0)} → purchase</div>
-      </div>
-      <div class="card">
-        <div class="card-title">Purchase</div>
-        <div class="card-value">${fmtNumber(s.purchases)}</div>
-        <div class="card-sub">Sessioni uniche: ${fmtNumber(s.uniqueSessions || 0)}</div>
-      </div>
-      <div class="card">
-        <div class="card-title">Carrelli attivi (reali)</div>
-        <div class="card-value">${fmtNumber(s.activeCarts || 0)}</div>
-        <div class="card-sub">Visitatori totali: ${fmtNumber(s.uniqueVisitors || 0)}</div>
-      </div>
-    `;
-  }
-
-  function renderFunnel(s) {
-    funnelEl.innerHTML = `
-      <div class="funnel-step">
-        <div class="funnel-step-title">Pageview</div>
-        <div class="funnel-step-value">${fmtNumber(s.pageviews)}</div>
-      </div>
-      <div class="funnel-step">
-        <div class="funnel-step-title">View product</div>
-        <div class="funnel-step-value">${fmtNumber(s.productViews)}</div>
-        <div class="funnel-step-cr">CR: ${fmtPercent(s.crProductToCart || 0)} → add_to_cart</div>
-      </div>
-      <div class="funnel-step">
-        <div class="funnel-step-title">Add to cart</div>
-        <div class="funnel-step-value">${fmtNumber(s.addToCart)}</div>
-        <div class="funnel-step-cr">CR: ${fmtPercent(s.crCartToPurchase || 0)} → purchase</div>
-      </div>
-      <div class="funnel-step">
-        <div class="funnel-step-title">Purchase</div>
-        <div class="funnel-step-value">${fmtNumber(s.purchases)}</div>
-        <div class="funnel-step-cr">CR: ${fmtPercent(s.crPageviewToPurchase || 0)} da pageview</div>
-      </div>
-    `;
-  }
-
-  function renderCheckout(s) {
-    const cs = s.checkoutSteps || {};
-    checkoutEl.innerHTML = `
-      <div class="card">
-        <div class="card-title">Cart</div>
-        <div class="card-value">${fmtNumber(cs.cart || 0)}</div>
-      </div>
-      <div class="card">
-        <div class="card-title">Checkout</div>
-        <div class="card-value">${fmtNumber(cs.checkout || 0)}</div>
-      </div>
-      <div class="card">
-        <div class="card-title">Shipping</div>
-        <div class="card-value">${fmtNumber(cs.shipping || 0)}</div>
-      </div>
-      <div class="card">
-        <div class="card-title">Payment</div>
-        <div class="card-value">${fmtNumber(cs.payment || 0)}</div>
-      </div>
-      <div class="card">
-        <div class="card-title">Thank you</div>
-        <div class="card-value">${fmtNumber(cs.thankyou || 0)}</div>
-      </div>
-    `;
-  }
-
-  function renderTopPages(s) {
-    const pages = s.topPages || [];
-    if (!pages.length) {
-      topPagesEl.classList.add("muted");
-      topPagesEl.innerHTML = "Nessun dato sufficiente.";
-      return;
-    }
-    let html = `<div class="card-title">Top pages (ultimi eventi)</div><table><tbody>`;
-    pages.forEach(p => {
-      html += `<tr><td>${p.path}</td><td style="text-align:right">${fmtNumber(p.count)}</td></tr>`;
-    });
-    html += `</tbody></table>`;
-    topPagesEl.classList.remove("muted");
-    topPagesEl.innerHTML = html;
-  }
-
-  function renderTraffic(s) {
-    const refs = s.topReferrers || [];
-    const utm = s.utmCombos || [];
-
-    if (!refs.length) {
-      trafficEl.classList.add("muted");
-      trafficEl.innerHTML = "Nessun dato referrer disponibile.";
-    } else {
-      let html = `<div class="card-title">Fonti di traffico (referrer)</div><table><tbody>`;
-      refs.forEach(r => {
-        html += `<tr><td>${r.source}</td><td style="text-align:right">${fmtNumber(r.count)}</td></tr>`;
-      });
-      html += `</tbody></table>`;
-      trafficEl.classList.remove("muted");
-      trafficEl.innerHTML = html;
-    }
-
-    if (!utm.length) {
-      utmEl.classList.add("muted");
-      utmEl.innerHTML = "Nessuna UTM rilevata.";
-    } else {
-      let html = `<div class="card-title">UTM (ultime campagne)</div><table><tbody>`;
-      utm.forEach(u => {
-        html += `<tr><td>source: <b>${u.source}</b> · medium: <b>${u.medium}</b> · campaign: <b>${u.campaign}</b></td><td style="text-align:right">${fmtNumber(u.count)}</td></tr>`;
-      });
-      html += `</tbody></table>`;
-      utmEl.classList.remove("muted");
-      utmEl.innerHTML = html;
-    }
-  }
-
-  function renderProductsAndMedia(s) {
-    const cat = s.productCategories || {};
-    const grams = s.gramsViews || {};
-    const media = s.mediaInteractions || {};
-
-    // categorie
-    const catEntries = Object.entries(cat);
-    if (!catEntries.length) {
-      productCatEl.classList.add("muted");
-      productCatEl.innerHTML = "Nessun dato prodotti.";
-    } else {
-      let html = `<div class="card-title">Categorie prodotto (view_product)</div><table><tbody>`;
-      catEntries.sort((a,b) => b[1]-a[1]).forEach(([name,val]) => {
-        html += `<tr><td>${name}</td><td style="text-align:right">${fmtNumber(val)}</td></tr>`;
-      });
-      html += `</tbody></table>`;
-      productCatEl.classList.remove("muted");
-      productCatEl.innerHTML = html;
-    }
-
-    // grammi
-    const gramsEntries = Object.entries(grams);
-    if (!gramsEntries.length) {
-      gramsEl.classList.add("muted");
-      gramsEl.innerHTML = "Nessun dato grammi.";
-    } else {
-      let html = `<div class="card-title">Grammature viste</div><table><tbody>`;
-      gramsEntries.sort((a,b) => Number(a[0]) - Number(b[0])).forEach(([g,val]) => {
-        html += `<tr><td>${g} g</td><td style="text-align:right">${fmtNumber(val)}</td></tr>`;
-      });
-      html += `</tbody></table>`;
-      gramsEl.classList.remove("muted");
-      gramsEl.innerHTML = html;
-    }
-
-    // media
-    const mediaEntries = Object.entries(media);
-    if (!mediaEntries.length) {
-      mediaEl.classList.add("muted");
-      mediaEl.innerHTML = "Nessuna interazione media.";
-    } else {
-      let html = `<div class="card-title">Interazioni media</div><table><tbody>`;
-      mediaEntries.forEach(([k,val]) => {
-        const [type,action] = k.split(":");
-        html += `<tr><td>${type} · ${action}</td><td style="text-align:right">${fmtNumber(val)}</td></tr>`;
-      });
-      html += `</tbody></table>`;
-      mediaEl.classList.remove("muted");
-      mediaEl.innerHTML = html;
-    }
-  }
-
-  function renderGeoAndTech(s) {
-    const countries = s.countries || {};
-    const geoEntries = Object.entries(countries);
-
-    if (!geoEntries.length) {
-      geoEl.classList.add("muted");
-      geoEl.innerHTML = "Nessun dato geografico.";
-    } else {
-      let html = `<div class="card-title">Paesi (ultimi eventi)</div><table><tbody>`;
-      geoEntries.sort((a,b) => b[1]-a[1]).forEach(([c,val]) => {
-        html += `<tr><td>${c}</td><td style="text-align:right">${fmtNumber(val)}</td></tr>`;
-      });
-      html += `</tbody></table>`;
-      geoEl.classList.remove("muted");
-      geoEl.innerHTML = html;
-    }
-
-    const perf = s.perfSummary || {};
-    const jsErrors = s.jsErrors || 0;
-    const payErrors = s.paymentErrors || 0;
-
-    let html = `<div class="card-title">Salute tecnica</div><div class="card-sub">Errori JS: ${fmtNumber(jsErrors)} · Errori pagamento: ${fmtNumber(payErrors)}</div>`;
-    if (perf.samples) {
-      html += `<div class="card-sub" style="margin-top:8px;">
-        LCP medio: ${perf.avgLcp ? perf.avgLcp.toFixed(0) + " ms" : "-"} ·
-        FCP medio: ${perf.avgFcp ? perf.avgFcp.toFixed(0) + " ms" : "-"} ·
-        TTFB medio: ${perf.avgTtfb ? perf.avgTtfb.toFixed(0) + " ms" : "-"}
-      </div>`;
-    }
-    techEl.classList.remove("muted");
-    techEl.innerHTML = html;
-  }
-
-  // ------------------ EVENTI RECENTI ------------------
-
-  function rangeParamFromFilter() {
-    const v = filterTimeEl ? filterTimeEl.value : "7";
-    if (v === "all") return null;
-    if (v === "7")   return "7d";
-    if (v === "30")  return "30d";
-    if (v === "90")  return "90d";
-    if (v === "180") return "180d";
-    if (v === "365") return "365d";
-    return null;
-  }
-
-async function loadEvents() {
-  try {
-    const range = rangeParamFromFilter();
-    let url = "/api/events?limit=500";
-    if (range) url += "&range=" + encodeURIComponent(range);
-
-    const res = await fetch(url);
-    if (!res.ok) {
-      console.error("Errore /api/events", res.status);
-      return;
-    }
-
-    const data = await res.json();
-    // compatibile con entrambi i casi:
-    //  - [ {event}, ... ]
-    //  - { events: [ ... ] }
-    ALL_EVENTS = Array.isArray(data) ? data : (data.events || []);
-
-    renderEvents();
-  } catch (err) {
-    console.error("loadEvents error", err);
-  }
-}
-
-
-  function describeEvent(p) {
-    if (!p || !p.type) return "";
-    switch (p.type) {
-      case "pageview":
-        return p.title || "";
-      case "timeonpage":
-        if (typeof p.millis === "number") {
-          return "Tempo sulla pagina: " + (p.millis / 1000).toFixed(1) + " s";
-        }
-        return "";
-      case "view_product":
-        return (p.productTitle || "") + (p.grams ? ` · ${p.grams} g` : "");
-      case "add_to_cart": {
-        const qty = p.quantity || 1;
-
-        if (p.productTitle || p.variantTitle || p.grams) {
-          const parts = [];
-
-          if (p.productTitle) parts.push(p.productTitle);
-
-          if (p.variantTitle) {
-            // es. "50 g" o "50g"
-            parts.push(p.variantTitle);
-          } else if (p.grams) {
-            parts.push(p.grams + " g");
-          }
-
-          const label = parts.join(" – ");
-          return label + " x" + qty;
-        }
-
-        // fallback
-        return "Variant " + (p.variantId || "") + " x" + qty;
+      function cr(from, to) {
+        if (!from) return "CR: 0.0%";
+        const val = (to / from) * 100;
+        return "CR: " + val.toFixed(1) + "%";
       }
-      case "cart_state":
-        return (p.items && p.items.length ? `${p.items.length} righe in carrello` : "Carrello vuoto");
-      case "checkout_step":
-        return `Step: ${p.step || ""} (#${p.stepIndex || ""})`;
-      case "media_interaction":
-        return `${p.mediaType || "media"} · ${p.action || ""}`;
-      case "js_error":
-        return p.message || "";
-      default:
-        return "";
+
+      el.innerHTML = [
+        {
+          title: "Pageview",
+          value: pv,
+          cr: cr(pv, pur) + " → purchase"
+        },
+        {
+          title: "View product",
+          value: vp,
+          cr: cr(vp, atc) + " → add_to_cart"
+        },
+        {
+          title: "Add to cart",
+          value: atc,
+          cr: cr(atc, pur) + " → purchase"
+        },
+        {
+          title: "Purchase",
+          value: pur,
+          cr: ""
+        }
+      ].map(step =>
+        '<div class="funnel-step">' +
+          '<div class="funnel-step-title">'+ esc(step.title) +'</div>' +
+          '<div class="funnel-step-value">'+ esc(step.value) +'</div>' +
+          (step.cr ? '<div class="funnel-step-cr">'+ esc(step.cr) +'</div>' : '') +
+        '</div>'
+      ).join("");
     }
-  }
 
-  function renderEvents() {
-    const typeFilter = filterTypeEl ? filterTypeEl.value : "all";
-    const textFilter = filterTextEl ? filterTextEl.value.toLowerCase() : "";
+    function renderTopPages(summary) {
+      const el = document.getElementById("topPages");
+      if (!summary.topPages || !summary.topPages.length) {
+        el.className = "card muted";
+        el.textContent = "Nessun dato sufficiente.";
+        return;
+      }
+      el.className = "card";
+      el.innerHTML = '<div class="card-title">Top pages (ultimi eventi)</div>' +
+        summary.topPages.map(p =>
+          '<div class="card-sub">'+ esc(p.path) +' – '+ esc(p.count) +' visite</div>'
+        ).join("");
+    }
 
-    const rows = [];
-    ALL_EVENTS.forEach(ev => {
+    function renderTrafficSources(summary) {
+      const el = document.getElementById("trafficSources");
+      if (!summary.topReferrers || !summary.topReferrers.length) {
+        el.className = "card muted";
+        el.textContent = "Nessun dato referrer disponibile.";
+        return;
+      }
+      el.className = "card";
+      el.innerHTML = '<div class="card-title">Fonti di traffico (referrer)</div>' +
+        summary.topReferrers.map(r =>
+          '<div class="card-sub">'+ esc(r.source) +' – '+ esc(r.count) +' pageview</div>'
+        ).join("");
+    }
+
+    function renderUtm(summary) {
+      const el = document.getElementById("utmSources");
+      if (!summary.utmCombos || !summary.utmCombos.length) {
+        el.className = "card muted";
+        el.textContent = "Nessuna UTM rilevata.";
+        return;
+      }
+      el.className = "card";
+      el.innerHTML = '<div class="card-title">UTM (ultime campagne)</div>' +
+        summary.utmCombos.map(u =>
+          '<div class="card-sub">source: <strong>'+ esc(u.source) +
+          '</strong> · medium: <strong>'+ esc(u.medium) +
+          '</strong> · campaign: <strong>'+ esc(u.campaign) +
+          '</strong> ('+ esc(u.count) +' pageview)</div>'
+        ).join("");
+    }
+
+    function formatDate(ts) {
+      if (!ts) return "";
+      const d = new Date(ts);
+      if (isNaN(d)) return esc(ts);
+      const dd = String(d.getDate()).padStart(2,"0");
+      const mm = String(d.getMonth()+1).padStart(2,"0");
+      const yyyy = d.getFullYear();
+      const hh = String(d.getHours()).padStart(2,"0");
+      const mi = String(d.getMinutes()).padStart(2,"0");
+      const ss = String(d.getSeconds()).padStart(2,"0");
+      return `${dd}/${mm}/${yyyy}, ${hh}:${mi}:${ss}`;
+    }
+
+    function buildDetails(ev) {
       const p = ev.payload || {};
-      const type = p.type || "unknown";
-      const when = ev.receivedAt ? new Date(ev.receivedAt) : null;
-      const url = p.path || p.url || "";
-      const details = describeEvent(p);
+      switch (p.type) {
+        case "timeonpage":
+          return "Durata: " + ((p.millis||0)/1000).toFixed(0) + "s";
+        case "scroll":
+          return "Profondità: " + (p.depth||0) + "%";
+        case "view_product":
+          return "Prodotto: " + (p.productTitle || p.productId || "");
+        case "add_to_cart":
+          return "Variant: " + (p.variantId||"") + " · qty: " + (p.quantity||1);
+        case "purchase":
+          return "Ordine: " + (p.orderId || "") + " · valore: " + (p.total || "");
+        case "cta_click":
+          return "CTA: " + (p.label || "") + " · testo: " + (p.text || "");
+        default:
+          return "";
+      }
+    }
 
-      if (typeFilter !== "all" && type !== typeFilter) return;
-      const blob = (url + " " + (details || "")).toLowerCase();
-      if (textFilter && !blob.includes(textFilter)) return;
+function renderTable() {
+  const tbody = document.getElementById("eventsTableBody");
+  const typeFilter = document.getElementById("filterType").value;
+  const textFilter = document.getElementById("filterText").value.toLowerCase();
+  const timeFilter = document.getElementById("filterTime").value;
 
-      rows.push({ when, type, url, details });
+  let rows = ALL_EVENTS;
+
+  // FILTRO TEMPORALE
+  if (timeFilter !== "all") {
+    const days = Number(timeFilter);
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+
+    rows = rows.filter(ev => {
+      const ts = new Date(ev.receivedAt || ev.payload?.ts).getTime();
+      return ts >= cutoff;
     });
+  }
 
-    tbodyEl.innerHTML = "";
-    rows.forEach(r => {
-      const tr = document.createElement("tr");
-      const tdWhen = document.createElement("td");
-      const tdType = document.createElement("td");
-      const tdUrl  = document.createElement("td");
-      const tdDet  = document.createElement("td");
+  // FILTRO PER TIPO
+  if (typeFilter !== "all") {
+    rows = rows.filter(ev => (ev.payload && ev.payload.type) === typeFilter);
+  }
 
-      tdWhen.textContent = r.when ? r.when.toLocaleString("it-IT") : "";
-      tdType.textContent = r.type;
-      tdUrl.textContent  = r.url;
-      tdDet.textContent  = r.details;
-
-      tr.appendChild(tdWhen);
-      tr.appendChild(tdType);
-      tr.appendChild(tdUrl);
-      tr.appendChild(tdDet);
-      tbodyEl.appendChild(tr);
+  // FILTRO TESTO
+  if (textFilter) {
+    rows = rows.filter(ev => {
+      const p = ev.payload || {};
+      const hay =
+        (ev.path || "") + " " +
+        (p.title || "") + " " +
+        (buildDetails(ev) || "");
+      return hay.toLowerCase().includes(textFilter);
     });
-
-    rowsInfoEl.textContent = rows.length
-      ? `${rows.length} eventi mostrati`
-      : "0 eventi mostrati";
   }
 
-  async function loadFunnel(){
-   const r = await fetch("/api/funnel");
-   const data = await r.json();
-  
-   document.getElementById("funnel").innerHTML = `
-     Product views: ${data.view_product}<br>
-     Add to cart: ${data.add_to_cart}<br>
-     Checkout: ${data.begin_checkout}
-   `;
-  }
-  
-  async function loadSources(){
-   const r = await fetch("/api/traffic-sources");
-   const data = await r.json();
-  
-   document.getElementById("sources").innerHTML =
-     data.map(s => `${s.source}: ${s.visits}`).join("<br>");
-  }
+  document.getElementById("rowsInfo").textContent =
+    rows.length + " eventi mostrati";
 
-  async function loadGeo(){
-   const r = await fetch("/api/geo");
-   const data = await r.json();
-  
-   document.getElementById("geo").innerHTML =
-     data.map(g => `${g.country}: ${g.visits}`).join("<br>");
-  }
-  
-  // ------------------ INIT ------------------
-  if (filterTimeEl) {
-    filterTimeEl.addEventListener("change", loadEvents);
-  }
-  if (filterTypeEl) {
-    filterTypeEl.addEventListener("change", renderEvents);
-  }
-  if (filterTextEl) {
-    filterTextEl.addEventListener("input", renderEvents);
-  }
+  tbody.innerHTML = rows.map(ev => {
+    const p = ev.payload || {};
+    const url = p.url || ev.path || "";
+    const typ = p.type || "";
+    return (
+      "<tr>" +
+        "<td>" + esc(formatDate(ev.receivedAt || p.ts)) + "</td>" +
+        "<td><span class='tag tag-green'>" + esc(typ) + "</span></td>" +
+        "<td>" + esc(url) + "</td>" +
+        "<td>" + esc(buildDetails(ev)) + "</td>" +
+      "</tr>"
+    );
+  }).join("");
+}
 
-  loadSummary();
-  loadEvents();
-  loadFunnel();
-  loadSources();
-  loadGeo();
-  
-})();
-</script>
 
+    function loadAll() {
+      Promise.all([
+        fetch("/api/summary").then(r => r.json()),
+        fetch("/api/events?limit=300").then(r => r.json())
+      ]).then(([summary, events]) => {
+        ALL_EVENTS = events || [];
+        renderOverview(summary || {});
+        renderFunnel(summary || {});
+        renderTopPages(summary || {});
+        renderTrafficSources(summary || {});
+        renderUtm(summary || {});
+        renderTable();
+      }).catch(err => {
+        console.error("Errore nel caricamento della dashboard", err);
+      });
+    }
+
+    document.getElementById("filterType").addEventListener("change", renderTable);
+    document.getElementById("filterText").addEventListener("input", function() {
+      // piccolo debounce
+      clearTimeout(window._lpdcFilterTimer);
+      window._lpdcFilterTimer = setTimeout(renderTable, 120);
+    });
+    document.getElementById("filterTime").addEventListener("change", renderTable);
+
+    loadAll();
+    // auto-refresh ogni 5 minuti
+    //setInterval(loadAll, 300000);
+  </script>
 </body>
 </html>
