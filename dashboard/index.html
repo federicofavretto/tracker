@@ -200,6 +200,15 @@
   <!-- Eventi recenti -->
   <div class="section-title">Eventi recenti</div>
 
+  <h2>Funnel</h2>
+  <div id="funnel"></div>
+
+  <h2>Traffic sources</h2>
+  <div id="sources"></div>
+
+  <h2>Countries</h2>
+  <div id="geo"></div>
+  
   <div class="filters">
     <label>Periodo:
       <select id="filterTime" class="select">
@@ -674,6 +683,33 @@ async function loadEvents() {
       : "0 eventi mostrati";
   }
 
+  async function loadFunnel(){
+   const r = await fetch("/api/funnel");
+   const data = await r.json();
+  
+   document.getElementById("funnel").innerHTML = `
+     Product views: ${data.view_product}<br>
+     Add to cart: ${data.add_to_cart}<br>
+     Checkout: ${data.begin_checkout}
+   `;
+  }
+  
+  async function loadSources(){
+   const r = await fetch("/api/traffic-sources");
+   const data = await r.json();
+  
+   document.getElementById("sources").innerHTML =
+     data.map(s => `${s.source}: ${s.visits}`).join("<br>");
+  }
+
+  async function loadGeo(){
+   const r = await fetch("/api/geo");
+   const data = await r.json();
+  
+   document.getElementById("geo").innerHTML =
+     data.map(g => `${g.country}: ${g.visits}`).join("<br>");
+  }
+  
   // ------------------ INIT ------------------
   if (filterTimeEl) {
     filterTimeEl.addEventListener("change", loadEvents);
@@ -685,9 +721,12 @@ async function loadEvents() {
     filterTextEl.addEventListener("input", renderEvents);
   }
 
-
   loadSummary();
   loadEvents();
+  loadFunnel();
+  loadSources();
+  loadGeo();
+  
 })();
 </script>
 
