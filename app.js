@@ -4,33 +4,40 @@ const fs = require("fs");
 const path = require("path");
 const pool = require("./db"); // pool Postgres
 
+// ------------------ INIT DATABASE ------------------
+async function initDb() {
+  try {
+    await pool.query(`
+      DROP TABLE IF EXISTS events;
+
+      CREATE TABLE events (
+        id           BIGSERIAL PRIMARY KEY,
+        occurred_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        ip           TEXT,
+        user_agent   TEXT,
+        payload      JSONB
+      );
+
+      CREATE INDEX idx_events_occurred_at ON events(occurred_at);
+    `);
+
+    console.log("Tabella events ricreata correttamente");
+  } catch (err) {
+    console.error("Errore initDb:", err.message);
+    console.error("DETAIL:", err.detail);
+    console.error("CODE:", err.code);
+    console.error("STACK:", err.stack);
+  }
+}
+
+initDb();
+
 const app = express();
 const RESET_TOKEN = "LAPERLE_RESET_2024";
 
 // Deduplica add_to_cart lato server (2 secondi)
 const recentAddToCart = new Map();
 const ADD_DEDUP_MS = 2000;
-
-// ------------------ INIT DATABASE ------------------
-async function initDb() {
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS events (
-        id SERIAL PRIMARY KEY,
-        type TEXT,
-        visitor_id TEXT,
-        session_id TEXT,
-        data JSONB,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-    console.log("Tabella events pronta");
-  } catch (err) {
-    console.error("Errore creazione tabella events:", err);
-  }
-}
-
-initDb();
 
 // ------------------ MIDDLEWARE ------------------
 app.use(
