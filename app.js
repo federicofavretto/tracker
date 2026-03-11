@@ -11,6 +11,26 @@ const RESET_TOKEN = "LAPERLE_RESET_2024";
 const recentAddToCart = new Map();
 const ADD_DEDUP_MS = 2000;
 
+// ------------------ INIT DATABASE ------------------
+async function initDb() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS events (
+        id SERIAL PRIMARY KEY,
+        type TEXT,
+        visitor_id TEXT,
+        session_id TEXT,
+        data JSONB,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    console.log("Tabella events pronta");
+  } catch (err) {
+    console.error("Errore creazione tabella events:", err);
+  }
+}
+
+initDb();
 
 // ------------------ MIDDLEWARE ------------------
 app.use(
