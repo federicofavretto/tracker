@@ -8,9 +8,7 @@ const pool = require("./db"); // pool Postgres
 async function initDb() {
   try {
     await pool.query(`
-      DROP TABLE IF EXISTS events;
-
-      CREATE TABLE events (
+      CREATE TABLE IF NOT EXISTS events (
         id           BIGSERIAL PRIMARY KEY,
         occurred_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         ip           TEXT,
@@ -18,16 +16,15 @@ async function initDb() {
         payload      JSONB
       );
 
-      CREATE INDEX idx_events_occurred_at ON events(occurred_at);
+      CREATE INDEX IF NOT EXISTS idx_events_occurred_at ON events(occurred_at);
     `);
 
-    console.log("Tabella events ricreata correttamente");
+    console.log("Tabella events pronta");
   } catch (err) {
-//    console.error("Errore initDb:", err.message);
+    console.error("Errore initDb:", err.message);
     console.error("DETAIL:", err.detail);
     console.error("CODE:", err.code);
     console.error("STACK:", err.stack);
-    console.error("Errore in /collect:", err.message);
   }
 }
 
