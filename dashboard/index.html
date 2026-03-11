@@ -363,29 +363,49 @@ async function loadSummary() {
     `;
   }
 
-  function renderFunnel(s) {
-    funnelEl.innerHTML = `
+function renderFunnel(s) {
+  const steps = [
+    {
+      label: "Pageview",
+      value: Number(s.pageviews || 0),
+      sub: ""
+    },
+    {
+      label: "View product",
+      value: Number(s.productViews || 0),
+      sub: `CR → add_to_cart: ${fmtPercent(s.crProductToCart || 0)}`
+    },
+    {
+      label: "Add to cart",
+      value: Number(s.addToCart || 0),
+      sub: `CR → purchase: ${fmtPercent(s.crCartToPurchase || 0)}`
+    },
+    {
+      label: "Purchase",
+      value: Number(s.purchases || 0),
+      sub: `CR da pageview: ${fmtPercent(s.crPageviewToPurchase || 0)}`
+    }
+  ];
+
+  const max = Math.max(...steps.map(x => x.value), 1);
+
+  funnelEl.innerHTML = steps.map(step => {
+    const width = Math.max(8, (step.value / max) * 100);
+
+    return `
       <div class="funnel-step">
-        <div class="funnel-step-title">Pageview</div>
-        <div class="funnel-step-value">${fmtNumber(s.pageviews)}</div>
-      </div>
-      <div class="funnel-step">
-        <div class="funnel-step-title">View product</div>
-        <div class="funnel-step-value">${fmtNumber(s.productViews)}</div>
-        <div class="funnel-step-cr">CR: ${fmtPercent(s.crProductToCart || 0)} → add_to_cart</div>
-      </div>
-      <div class="funnel-step">
-        <div class="funnel-step-title">Add to cart</div>
-        <div class="funnel-step-value">${fmtNumber(s.addToCart)}</div>
-        <div class="funnel-step-cr">CR: ${fmtPercent(s.crCartToPurchase || 0)} → purchase</div>
-      </div>
-      <div class="funnel-step">
-        <div class="funnel-step-title">Purchase</div>
-        <div class="funnel-step-value">${fmtNumber(s.purchases)}</div>
-        <div class="funnel-step-cr">CR: ${fmtPercent(s.crPageviewToPurchase || 0)} da pageview</div>
+        <div class="funnel-step-title">${step.label}</div>
+        <div class="funnel-step-value">${fmtNumber(step.value)}</div>
+        <div style="margin-top:10px;">
+          <div style="height:8px; background:rgba(255,255,255,0.06); border-radius:999px; overflow:hidden;">
+            <div style="height:100%; width:${width}%; background:linear-gradient(90deg,#5cc9ff 0%, #7cf2c2 100%); border-radius:999px;"></div>
+          </div>
+        </div>
+        <div class="funnel-step-cr">${step.sub || "&nbsp;"}</div>
       </div>
     `;
-  }
+  }).join("");
+}
 
   function renderCheckout(s) {
     const cs = s.checkoutSteps || {};
