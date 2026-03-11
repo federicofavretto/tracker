@@ -573,6 +573,123 @@ app.get("/admin/backup-csv", async (req, res) => {
   }
 });
 
+app.get("/api/funnel", async (req, res) => {
+  try {
+
+    const result = await pool.query(`
+      SELECT payload->>'type' AS type, COUNT(*) AS count
+      FROM events
+      WHERE payload->>'type' IN ('view_product','add_to_cart','begin_checkout')
+      GROUP BY type
+    `);
+
+    const data = {
+      view_product: 0,
+      add_to_cart: 0,
+      begin_checkout: 0
+    };
+
+    result.rows.forEach(r => {
+      data[r.type] = Number(r.count);
+    });
+
+    res.json(data);
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({error:"funnel_error"});
+  }
+});
+
+app.get("/api/traffic-sources", async (req,res)=>{
+  try {
+
+    const result = await pool.query(`
+      SELECT 
+        COALESCE(payload->>'utm_source', payload->>'referrer','direct') AS source,
+        COUNT(*) AS visits
+      FROM events
+      WHERE payload->>'type'='pageview'
+      GROUP BY source
+      ORDER BY visits DESC
+      LIMIT 20
+    `);
+
+    res.json(result.rows);
+
+  } catch(err){
+    console.error(err);
+    res.status(500).json({error:"traffic_error"});
+  }
+});
+
+app.get("/api/geo", async (req,res)=>{
+  try{
+
+    const result = await pool.query(`
+      SELECT 
+        payload->'geo'->>'country' AS country,
+        COUNT(*) AS visits
+      FROM events
+      WHERE payload->'geo'->>'country' IS NOT NULL
+      GROUP BY country
+      ORDER BY visits DESC
+      LIMIT 20
+    `);
+
+    res.json(result.rows);
+
+  }catch(err){
+    console.error(err);
+    res.status(500).json({error:"geo_error"});
+  }
+});
+
+app.get("/api/top-products", async (req,res)=>{
+  try{
+
+    const result = await pool.query(`
+      SELECT 
+        payload->>'productTitle' AS product,
+        COUNT(*) AS views
+      FROM events
+      WHERE payload->>'type'='view_product'
+      GROUP BY product
+      ORDER BY views DESC
+      LIMIT 20
+    `);
+
+    res.json(result.rows);
+
+  }catch(err){
+    console.error(err);
+    res.status(500).json({error:"product_error"});
+  }
+});
+
+app.get("/api/top-cart", async (req,res)=>{
+  try{
+
+    const result = await pool.query(`
+      SELECT 
+        payload->>'productTitle' AS product,
+        COUNT(*) AS adds
+      FROM events
+      WHERE payload->>'type'='add_to_cart'
+      GROUP BY product
+      ORDER BY adds DESC
+      LIMIT 20
+    `);
+
+    res.json(result.rows);
+
+  }catch(err){
+    console.error(err);
+    res.status(500).json({error:"cart_error"});
+  }
+});
+
+
 // ------------------ AVVIO SERVER ------------------
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
