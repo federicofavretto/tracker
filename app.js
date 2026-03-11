@@ -23,10 +23,11 @@ async function initDb() {
 
     console.log("Tabella events ricreata correttamente");
   } catch (err) {
-    console.error("Errore initDb:", err.message);
+//    console.error("Errore initDb:", err.message);
     console.error("DETAIL:", err.detail);
     console.error("CODE:", err.code);
     console.error("STACK:", err.stack);
+    console.error("Errore in /collect:", err.message);
   }
 }
 
